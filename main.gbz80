@@ -1,0 +1,419 @@
+ASSERTIONS EQU 0
+
+;-------------
+; gb-template - bank0.asm
+;-------------
+; Includes
+;-------------
+	
+INCLUDE "macros.gbz80"
+INCLUDE "hardware.gbz80"
+INCLUDE "header.gbz80"
+INCLUDE "tiles.gbz80"
+INCLUDE "map.gbz80"
+INCLUDE "memory.gbz80"
+INCLUDE "variables.gbz80"
+
+;-------------
+; Start
+;-------------
+SECTION "DMA Routine",ROM0
+DMACode:
+	DB  $F5, $3E, $C1, $EA, $46, $FF, $3E, $28, $3D, $20, $FD, $F1, $D9
+DMACodeEnd:
+
+SECTION "Program Start",ROM0[$150]
+ProgramStart:
+	ei				 ;enable interrupts
+	ld  sp,$FFFE  ; Init stack pointer
+	ld  a,IEF_VBLANK ;enable vblank interrupt
+	ld  [rIE],a
+
+	xor a
+	ldh [rLCDC],a 	 ;LCD off
+	ldh [rSTAT],a
+
+; 	ld  a,%00011011  ;shade palette (11 10 01 00)
+	ld  a,%11100100  ;shade palette (11 10 01 00)
+	ldh [rBGP],a 	 ;setup palettes
+	ldh [rOCPD],a
+	ldh [rOBP0],a
+
+	call LoadTiles
+	call LoadMap
+	call ClearSprites
+; 	call ClearScreen
+
+
+F = (LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON)
+	ld  a,F  ;turn on LCD, BG0, OBJ0, etc
+	ldh [rLCDC],a    ;load LCD flags
+
+	rst $28 ; Copy DMA routine to HRAM
+
+InitRam:
+	xor a
+	ld [ButtonsDown],a
+	ld [ButtonsPressed],a
+
+	ld a, 160/2
+	ld [SprPlayer.X], a
+	ld a, 144/2
+	ld [SprPlayer.Y], a
+
+	ld a, 80
+	ld [PlayerX], a
+	ld a, 64
+	ld [PlayerY], a
+	ld a, $1e
+	ld [SprPlayer.Tile], a
+	ld a, $8A
+	ld [SprPlayer.Flags], a
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+GameLoop:
+; The outline of the main game loop is as follows:
+;     1) Wait for a vblank to have occured
+;     2) Read and store the state of the buttons on the gameboy
+;     3) Update the player's position (handling collisions)
+;     4) Doing the DMA transfer to the pixel processing unit (PPU)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+.WaitForVBlank:
+	halt ; @HardwareBug:
+	nop ; If interrupts are disabled, HALT jumps one instruction!
+
+	ld a, [IsWaitingForVBlank]
+	or a
+	jr nz, .WaitForVBlank ; zero means vblank has happened
+
+	; Here a should be zero, so increment to 1 to signify wait for vblank
+	inc a
+	ld [IsWaitingForVBlank], a
+
+	ld a, [VBlankCount]
+	inc a
+	ld [VBlankCount], a
+	
+;;;;;;;;;;;;;;;;;;;
+UpdateInput:
+;
+; NOTE(jakob):
+; a bit value of 0 means button is down
+;
+;;;;;;;;;;;;;;;;;;;
+	ld  a,JoyPad_Select_DPad
+	ldh  [JoyPad],a
+	ldh  a,[JoyPad]    ;takes a few cycles to get accurate reading
+	ldh  a,[JoyPad]
+	ldh  a,[JoyPad]
+	ldh  a,[JoyPad]
+;	cpl ;complement a
+	or %11110000	;mask dpad buttons
+	swap a
+	ld  b,a ; Save D-Pad states in register b
+
+	ld  a,JoyPad_Select_Other
+	ldh  [JoyPad],a  
+	ldh  a,[JoyPad]
+	ldh  a,[JoyPad]
+	ldh  a,[JoyPad]
+	ldh  a,[JoyPad]
+;	cpl
+	or %11110000 ; mask other buttons
+	and  b
+
+
+	ld  c,a ; b <- New Down state
+
+	ld  a,[ButtonsDown]
+	xor c
+	cpl
+	ld  [ButtonsPressed],a
+	ld  a, c
+	ld  [ButtonsDown],a
+
+	ld  a, JoyPad_Select_Other|JoyPad_Select_DPad
+	ld  [JoyPad], a
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+UpdatePlayerPosition:
+; Assert c contains ButtonsPressed
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+ButtonHandle: MACRO
+	bit \1, c
+	jr nz, .a\@
+	\2
+.a\@:
+ENDM
+
+	xor a
+	ld b, a
+	ld e, a
+
+	ButtonHandle ButtonRight, inc b\n inc b
+	ButtonHandle ButtonLeft, dec b\n dec b
+
+	; Add delta X
+	ld a, [PlayerX]
+	ld [OldPlayerX], a
+	add a, b
+	ld [PlayerX], a
+
+	sub a, 8
+
+	ld b, a
+
+	ld l, a
+	ld a, [PlayerY]
+	sub a, 16
+	call IsOccupiedBySolid;(l,a)
+
+	jr z, .SkipRevertX
+	ld a, [OldPlayerX]
+	ld [PlayerX], a
+
+	sub a, 8
+	ld b, a
+.SkipRevertX:
+
+	ButtonHandle ButtonDown, inc e\n inc e
+	ButtonHandle ButtonUp, dec e\n dec e
+
+	;inc e
+
+	; Add delta Y
+	ld a, [PlayerY]
+	ld [OldPlayerY], a
+	add a, e
+	ld [PlayerY], a
+	
+	sub a, 16
+	ld l, b
+	call IsOccupiedBySolid;(l,a)
+	jr z, .SkipYRevert
+	ld a, [OldPlayerY]
+	ld [PlayerY], a
+.SkipYRevert:
+
+	ld a, [PlayerX]
+	cp a, 160/2
+	jr .Here
+	ld [SprPlayer.X], a
+	jr .Else1
+.Here:
+	sub a, 160/2
+	ld [rScreenX], a
+.Else1
+
+	ld a, [PlayerY]
+	cp a, 144/2
+	jr .Here2
+	ld [SprPlayer.Y], a
+	jr .Else2
+.Here2:
+	sub a, 144/2
+	ld [rScreenY], a
+.Else2
+	call DMA ;call DMA routine in HRAM
+	jp GameLoop
+;--------------------------------------------------
+
+;-------------
+; Subroutines
+;-------------
+
+ClearSprites:
+	ld  hl, Sprites
+	xor a
+	ld  c, 4*40
+	call MemFill255
+	ret
+
+ClearScreen:
+	ld  hl, _SCRN0    ;load map0 ram
+	xor a
+	ld  bc, 1024
+	call MemFill
+	ret
+
+LoadTiles:
+	ld  hl, TileData
+	ld  de, _VRAM
+	ld  bc, (TileDataEnd-TileData)
+	call MemCopy
+	ret
+
+LoadMap:
+	ld  hl, MapData  ;same as LoadTiles
+	ld  de, _SCRN0
+	ld  bc, (MapDataEnd-MapData)
+	call MemCopy
+	ret
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+IsOccupiedBySolid:
+; Takes: A as the Y coordinate
+; Takes: L as the X corrdinate
+; Returns: If occupied in the zero flag (ZF=1 means occupied)
+; Clobbers: A, D, H, L, F
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+	rlca
+	rlca
+	ld h, a
+	rlca
+	and a, %00111000; These are the offset bits for Y
+	ld d, a
+	
+	ld a, l
+	and a, %00000111; These are the offset bits for X
+	or a, d
+	ld d, a
+	ld a, l
+	rrca
+	rrca
+	rrca
+	and a, %00011111
+	ld l, a
+
+	ld a, h
+	and a, %11100000
+	add a, l
+	;add a, (MapData&$ff)
+	ld l, a
+
+	ld a, h
+	and a, %00000011
+	add a, (MapData>>8)
+	ld h, a
+
+	; Always look at (x+0,y+0)
+	ld a, [hl+]
+	;ld e, a
+	or a
+	ret nz
+
+	ld a, d
+	and a, %00000111
+	jr z, .SkipUnalignedXCheck
+	; If not grid aligned on the x axis, check also (x+1,y+0) 
+	ld a, [hl]
+	or a;, e
+	;ld e, a
+	ret nz
+.SkipUnalignedXCheck:
+	ld a, d
+	and a, %00111000
+	ret z
+	
+	; Go relative to (-1, +1)
+	; 8 cycles, 8 bytes (This is faster than doing 16 bit add)
+	ld a, 31
+	add a, l
+	ld l, a
+	ld a, 0
+	adc a, h
+	ld h, a
+
+	; If not grid aligned on the y axis, check also (x+0,y+1) 
+	ld a, [hl+]
+	or a;, e
+	ret nz
+
+	ld a, d
+	and a, %00000111
+	ret z
+	; If neither grid aligned on x nor y, check (x+1,y+1)
+	ld a, [hl]
+	or a
+	ret
+
+
+GetTile:
+	; Takes: A as the Y coordinate
+	; Takes: L as the X corrdinate
+	; Returns address of underlying tile in HL
+	
+	rlca
+	rlca
+	ld h, a
+	
+	ld a, l
+	rrca
+	rrca
+	rrca
+	and a, %00011111
+	ld l, a
+
+	ld a, h
+	and a, %11100000
+	add a, l
+	;add a, (MapData&$ff)
+	ld l, a
+
+	ld a, h
+	;and a, %00011100 These are the offset bits
+	and a, %00000011
+	add a, (MapData>>8)
+	ld h, a
+
+	ret
+
+GetTile_Old:
+	; a = TileY
+	; e = TileX
+	; d = 0
+	; result in a
+	; Clobbers af, hl
+	push de
+
+	ld hl, MapData
+	add hl, de
+
+	; DE <- A*32
+	swap a
+	rlca
+	ld e, a
+	and a, %00011111
+	ld d, a
+	ld a, e
+	and a, %11100000
+	ld e, a
+
+	add hl, de
+
+	ld a, [hl]
+	pop de
+	ret
+
+PositionToMapDataOffset:
+	; (LeafCall)
+	; Takes: an X,Y coordinate in registers E (for X) and A (for Y)
+	; Takes: EXPLICIT return address in HL
+	; Returns: the corresponding offset into a 32x32 tile map in DE
+	; Clobbers: D
+
+	rlca
+	rlca
+	ld d, a
+	
+	ld a, e
+	rrca
+	rrca
+	rrca
+	and a, %00011111
+	ld e, a
+
+	ld a, d
+	and a, %11100000
+	add a, e
+	ld e, a
+
+	ld a, d
+	;and a, %00011100 These are the offset bits
+	and a, %00000011
+	ld d, a
+	; Note since leaf function, jump to explicit return address
+	jp hl
+PositionToMapDataOffsetEnd:

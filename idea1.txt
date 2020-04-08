@@ -1,0 +1,8 @@
+
+
+0000 0000 aaaa bbbb
+0000 0000 bbbb aaaa swap
+0000 0000 bbba aaab rlc
+bbba aaab bbba aaab ld
+000a aaab bbba aaab and %00011111
+000a aaab bbb0 0000 and %11100000
