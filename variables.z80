@@ -16,6 +16,8 @@ OldPlayerY db
 PlayerTileX db
 PlayerTileY db
 
+PlayerNumFramesInAir db
+
 SECTION "OAM Work Memory",WRAM0[$C100]
 Sprites:
 SprPlayer:

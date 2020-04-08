@@ -55,6 +55,7 @@ InitRam:
 	xor a
 	ld [ButtonsDown],a
 	ld [ButtonsPressed],a
+	ld [PlayerNumFramesInAir], a
 
 	ld a, 160/2
 	ld [SprPlayer.X], a
@@ -146,67 +147,105 @@ UpdatePlayerPosition:
 
 ButtonHandle: MACRO
 	bit \1, c
-	jr nz, .a\@
+	jr nz, .skip\@
 	\2
-.a\@:
+.skip\@:
 ENDM
 
 	xor a
-	ld b, a
+	ButtonHandle ButtonRight, add a\, 3
+	ButtonHandle ButtonLeft, sub a\, 3
 	ld e, a
-
-	ButtonHandle ButtonRight, inc b\n inc b
-	ButtonHandle ButtonLeft, dec b\n dec b
 
 	; Add delta X
 	ld a, [PlayerX]
-	ld [OldPlayerX], a
-	add a, b
+	add a, e
 	ld [PlayerX], a
-
-	sub a, 8
 
 	ld b, a
 
 	ld l, a
 	ld a, [PlayerY]
-	sub a, 16
 	call IsOccupiedBySolid;(l,a)
 
-	jr z, .SkipRevertX
-	ld a, [OldPlayerX]
+	jr z, .NoCollisionX
+	; A collision happend on the x axis
+	ld a, b            ; Restore new x coordinate
+	bit 7, e
+	jr z, .GoingRight
+	sub a, e           ; If deltaX was negative, subtract it to snap to the left
+.GoingRight:
+	and a, %11111000   ; mask off the offset to snap into grid-alignment
 	ld [PlayerX], a
-
-	sub a, 8
 	ld b, a
-.SkipRevertX:
+.NoCollisionX:
 
-	ButtonHandle ButtonDown, inc e\n inc e
-	ButtonHandle ButtonUp, dec e\n dec e
+	xor a
+	ButtonHandle ButtonDown, add a\, 3
+	ButtonHandle ButtonUp, sub a\, 3
+	ld e, a
 
-	;inc e
+IF 0
+	bit ButtonUp, c
+	jr nz, .ElseUpButton
+	dec e
+	dec e
+	dec e
+	jr .AfterUpButton
+	; Check if on ground
+	ld a, [PlayerX]
+	add a, 4
+	ld l, a
+	ld a, [PlayerY]
+	add a, 8
+	call GetTileAddress
+	ld a, [hl]
+	cp a, $1d	; Is wall tile
+	; If not on ground, skip jump code
+	jp nz, .AfterUpButton
 
+	; Move player up while holding up button
+	ld a, e
+	sub a, 15
+	ld e, a
+	jr .AfterUpButton
+.ElseUpButton:
+	; Add gravity
+	inc e
+	inc e
+.AfterUpButton:
+ENDC
 	; Add delta Y
 	ld a, [PlayerY]
-	ld [OldPlayerY], a
 	add a, e
 	ld [PlayerY], a
 	
-	sub a, 16
-	ld l, b
+	ld l, b ; Current X coordinate
+	ld b, a ; Candidate Y corrdinate
 	call IsOccupiedBySolid;(l,a)
-	jr z, .SkipYRevert
-	ld a, [OldPlayerY]
-	ld [PlayerY], a
-.SkipYRevert:
 
+	jr z, .NoCollisionY
+	; A collision happend on the y axis
+	ld a, b            ; Restore new y coordinate
+	bit 7, e
+	jr z, .GoingUp
+	sub a, e           ; If deltaY was negative, subtract it to snap upwards
+.GoingUp:
+	and a, %11111000   ; mask off the offset to snap into grid-alignment
+	ld [PlayerY], a
+	ld b, a
+.NoCollisionY:
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+UpdateViewPort:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	ld a, [PlayerX]
 	cp a, 160/2
 	jr .Here
 	ld [SprPlayer.X], a
 	jr .Else1
 .Here:
-	sub a, 160/2
+	sub a, 160/2 - 8
 	ld [rScreenX], a
 .Else1
 
@@ -216,7 +255,7 @@ ENDM
 	ld [SprPlayer.Y], a
 	jr .Else2
 .Here2:
-	sub a, 144/2
+	sub a, 144/2 - 16
 	ld [rScreenY], a
 .Else2
 	call DMA ;call DMA routine in HRAM
@@ -272,7 +311,7 @@ IsOccupiedBySolid:
 	rlca
 	and a, %00111000; These are the offset bits for Y
 	ld d, a
-	
+
 	ld a, l
 	and a, %00000111; These are the offset bits for X
 	or a, d
@@ -297,7 +336,6 @@ IsOccupiedBySolid:
 
 	; Always look at (x+0,y+0)
 	ld a, [hl+]
-	;ld e, a
 	or a
 	ret nz
 
@@ -306,8 +344,7 @@ IsOccupiedBySolid:
 	jr z, .SkipUnalignedXCheck
 	; If not grid aligned on the x axis, check also (x+1,y+0) 
 	ld a, [hl]
-	or a;, e
-	;ld e, a
+	or a
 	ret nz
 .SkipUnalignedXCheck:
 	ld a, d
@@ -325,7 +362,7 @@ IsOccupiedBySolid:
 
 	; If not grid aligned on the y axis, check also (x+0,y+1) 
 	ld a, [hl+]
-	or a;, e
+	or a
 	ret nz
 
 	ld a, d
@@ -338,7 +375,7 @@ IsOccupiedBySolid:
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-GetTile:
+GetTileAddress:
 	; Takes: A as the Y coordinate
 	; Takes: L as the X corrdinate
 	; Returns address of underlying tile in HL
