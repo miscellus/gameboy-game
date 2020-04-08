@@ -6,13 +6,13 @@ ASSERTIONS EQU 0
 ; Includes
 ;-------------
 	
-INCLUDE "macros.gbz80"
-INCLUDE "hardware.gbz80"
-INCLUDE "header.gbz80"
-INCLUDE "tiles.gbz80"
-INCLUDE "map.gbz80"
-INCLUDE "memory.gbz80"
-INCLUDE "variables.gbz80"
+INCLUDE "macros.z80"
+INCLUDE "hardware.z80"
+INCLUDE "header.z80"
+INCLUDE "tiles.z80"
+INCLUDE "map.z80"
+INCLUDE "memory.z80"
+INCLUDE "variables.z80"
 
 ;-------------
 ; Start
@@ -135,10 +135,14 @@ UpdateInput:
 	ld  a, JoyPad_Select_Other|JoyPad_Select_DPad
 	ld  [JoyPad], a
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	;;; Intended fall through ;;;
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 UpdatePlayerPosition:
 ; Assert c contains ButtonsPressed
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ButtonHandle: MACRO
 	bit \1, c
@@ -217,34 +221,37 @@ ENDM
 .Else2
 	call DMA ;call DMA routine in HRAM
 	jp GameLoop
-;--------------------------------------------------
 
-;-------------
-; Subroutines
-;-------------
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ClearSprites:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	ld  hl, Sprites
 	xor a
 	ld  c, 4*40
 	call MemFill255
 	ret
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ClearScreen:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	ld  hl, _SCRN0    ;load map0 ram
 	xor a
 	ld  bc, 1024
 	call MemFill
 	ret
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 LoadTiles:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	ld  hl, TileData
 	ld  de, _VRAM
 	ld  bc, (TileDataEnd-TileData)
 	call MemCopy
 	ret
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 LoadMap:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	ld  hl, MapData  ;same as LoadTiles
 	ld  de, _SCRN0
 	ld  bc, (MapDataEnd-MapData)
@@ -252,13 +259,13 @@ LoadMap:
 	ret
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 IsOccupiedBySolid:
 ; Takes: A as the Y coordinate
 ; Takes: L as the X corrdinate
 ; Returns: If occupied in the zero flag (ZF=1 means occupied)
 ; Clobbers: A, D, H, L, F
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	rlca
 	rlca
 	ld h, a
@@ -330,10 +337,12 @@ IsOccupiedBySolid:
 	ret
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 GetTile:
 	; Takes: A as the Y coordinate
 	; Takes: L as the X corrdinate
 	; Returns address of underlying tile in HL
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	
 	rlca
 	rlca
@@ -360,12 +369,14 @@ GetTile:
 
 	ret
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 GetTile_Old:
 	; a = TileY
 	; e = TileX
 	; d = 0
 	; result in a
 	; Clobbers af, hl
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	push de
 
 	ld hl, MapData
@@ -387,12 +398,14 @@ GetTile_Old:
 	pop de
 	ret
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 PositionToMapDataOffset:
 	; (LeafCall)
 	; Takes: an X,Y coordinate in registers E (for X) and A (for Y)
 	; Takes: EXPLICIT return address in HL
 	; Returns: the corresponding offset into a 32x32 tile map in DE
 	; Clobbers: D
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	rlca
 	rlca
