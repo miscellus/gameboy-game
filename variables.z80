@@ -13,6 +13,9 @@ PlayerY db
 OldPlayerX db
 OldPlayerY db
 
+DeltaX db
+DeltaY db
+
 PlayerTileX db
 PlayerTileY db
 

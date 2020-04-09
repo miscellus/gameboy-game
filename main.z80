@@ -49,13 +49,15 @@ F = (LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON)
 	ld  a,F  ;turn on LCD, BG0, OBJ0, etc
 	ldh [rLCDC],a    ;load LCD flags
 
-	rst $28 ; Copy DMA routine to HRAM
+	rst CopyDmaResetVector
 
 InitRam:
 	xor a
 	ld [ButtonsDown],a
 	ld [ButtonsPressed],a
 	ld [PlayerNumFramesInAir], a
+	ld [DeltaX], a
+	ld [DeltaY], a
 
 	ld a, 160/2
 	ld [SprPlayer.X], a
@@ -127,8 +129,8 @@ UpdateInput:
 	ld  c,a ; b <- New Down state
 
 	ld  a,[ButtonsDown]
-	xor c
 	cpl
+	or c
 	ld  [ButtonsPressed],a
 	ld  a, c
 	ld  [ButtonsDown],a
@@ -145,6 +147,9 @@ UpdatePlayerPosition:
 ; Assert c contains ButtonsPressed
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+HSpeed equ 3
+JumpForce equ 28
+
 ButtonHandle: MACRO
 	bit \1, c
 	jr nz, .skip\@
@@ -153,8 +158,33 @@ ButtonHandle: MACRO
 ENDM
 
 	xor a
-	ButtonHandle ButtonRight, add a\, 3
-	ButtonHandle ButtonLeft, sub a\, 3
+	ButtonHandle ButtonRight, add a\, HSpeed
+	ButtonHandle ButtonLeft, sub a\, HSpeed
+	ld e, a
+	
+	ld a, [DeltaX]
+	add a, e
+	; n = n - ((n + (n>0 ? 7 : 0))>>3)
+	ld l, a
+	bit 7, a
+	jr nz, .NonPositiveDeltaX
+	or a
+	jr z, .NonPositiveDeltaX
+	; a > 0
+	add a, 15
+.NonPositiveDeltaX:
+	sra a
+	sra a
+	sra a
+	sra a
+	ld d, a
+	ld a, l
+	sub a, d
+
+	ld [DeltaX], a
+	sra a
+	sra a
+	sra a
 	ld e, a
 
 	; Add delta X
@@ -178,43 +208,72 @@ ENDM
 	and a, %11111000   ; mask off the offset to snap into grid-alignment
 	ld [PlayerX], a
 	ld b, a
-.NoCollisionX:
 
 	xor a
-	ButtonHandle ButtonDown, add a\, 3
-	ButtonHandle ButtonUp, sub a\, 3
-	ld e, a
+	ld [DeltaX], a
+.NoCollisionX:
 
-IF 0
+	ld a, [ButtonsPressed]
+	ld c, a
+	xor a
 	bit ButtonUp, c
-	jr nz, .ElseUpButton
-	dec e
-	dec e
-	dec e
-	jr .AfterUpButton
+	jr nz, .NoJump
+	ld e, a
 	; Check if on ground
 	ld a, [PlayerX]
-	add a, 4
+	ld c, a
 	ld l, a
 	ld a, [PlayerY]
 	add a, 8
 	call GetTileAddress
+	ld a, c
+	and a, %111
+	ld a, [hl+]
+	jr z, .TestGrounded
+	ld c, a
 	ld a, [hl]
-	cp a, $1d	; Is wall tile
-	; If not on ground, skip jump code
-	jp nz, .AfterUpButton
-
-	; Move player up while holding up button
+	or a, c
+.TestGrounded:
+	or a
 	ld a, e
-	sub a, 15
+	jp z, .NoJump
+	sub a, JumpForce
+	ld [DeltaY], a
+.NoJump:
+	
+	;ButtonHandle ButtonDown, add a\, Speed
+
+
 	ld e, a
-	jr .AfterUpButton
-.ElseUpButton:
-	; Add gravity
 	inc e
 	inc e
-.AfterUpButton:
-ENDC
+	inc e
+
+	ld a, [DeltaY]
+	add a, e
+	; n = n - ((n + (n>0 ? 7 : 0))>>3)
+	ld l, a
+	bit 7, a
+	jr nz, .NonPositiveDeltaY
+	or a
+	jr z, .NonPositiveDeltaY
+	; a > 0
+	add a, 15
+.NonPositiveDeltaY:
+	sra a
+	sra a
+	sra a
+	sra a
+	ld d, a
+	ld a, l
+	sub a, d
+
+	ld [DeltaY], a
+	sra a
+	sra a
+	sra a
+	ld e, a
+
 	; Add delta Y
 	ld a, [PlayerY]
 	add a, e
@@ -234,30 +293,22 @@ ENDC
 	and a, %11111000   ; mask off the offset to snap into grid-alignment
 	ld [PlayerY], a
 	ld b, a
+
+	xor a
+	ld [DeltaY], a
 .NoCollisionY:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 UpdateViewPort:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	ld a, [PlayerX]
-	cp a, 160/2
-	jr .Here
-	ld [SprPlayer.X], a
-	jr .Else1
-.Here:
 	sub a, 160/2 - 8
 	ld [rScreenX], a
-.Else1
 
 	ld a, [PlayerY]
-	cp a, 144/2
-	jr .Here2
-	ld [SprPlayer.Y], a
-	jr .Else2
-.Here2:
 	sub a, 144/2 - 16
 	ld [rScreenY], a
-.Else2
+
 	call DMA ;call DMA routine in HRAM
 	jp GameLoop
 

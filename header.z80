@@ -3,12 +3,9 @@
 ;-------------
 
 DMA equ $FF80
-CopyDMARoutineToHRAM: MACRO
-	rst $28
-ENDM
 
 SECTION "Copy Data",ROM0[$28] ;copy DMA routine to HRAM
-COPY_DMA_RESET_VECTOR:
+CopyDmaResetVector:
 ; 	ld de, $FF80 ;Hi mem address of DMACode
 	ld hl, DMACode
 	ld c, $80
