@@ -147,21 +147,23 @@ UpdatePlayerPosition:
 ; Assert c contains ButtonsPressed
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-HSpeed equ 3
-JumpForce equ 28
-
 ButtonHandle: MACRO
 	bit \1, c
 	jr nz, .skip\@
 	\2
 .skip\@:
 ENDM
+	
+JumpForce equ 32
+XSpeed equ 2
 
 	xor a
-	ButtonHandle ButtonRight, add a\, HSpeed
-	ButtonHandle ButtonLeft, sub a\, HSpeed
+;	ButtonHandle ButtonDown, ld [DeltaX]\, a
+	ButtonHandle ButtonRight, add a\, XSpeed
+	ButtonHandle ButtonLeft, sub a\, XSpeed
 	ld e, a
 	
+IF 0
 	ld a, [DeltaX]
 	add a, e
 	; n = n - ((n + (n>0 ? 7 : 0))>>3)
@@ -186,6 +188,8 @@ ENDM
 	sra a
 	sra a
 	ld e, a
+ENDC
+
 
 	; Add delta X
 	ld a, [PlayerX]
@@ -213,10 +217,10 @@ ENDM
 	ld [DeltaX], a
 .NoCollisionX:
 
-	ld a, [ButtonsPressed]
-	ld c, a
+	;ld a, [ButtonsPressed]
+	;ld c, a
 	xor a
-	bit ButtonUp, c
+	bit ButtonA, c
 	jr nz, .NoJump
 	ld e, a
 	; Check if on ground
@@ -264,10 +268,13 @@ ENDM
 	sra a
 	sra a
 	sra a
+	sra a
 	ld d, a
 	ld a, l
 	sub a, d
 
+	dec a ; Limit DeltaY
+	
 	ld [DeltaY], a
 	sra a
 	sra a
@@ -401,7 +408,7 @@ IsOccupiedBySolid:
 	ld a, d
 	and a, %00111000
 	ret z
-	
+
 	; Go relative to (-1, +1)
 	; 8 cycles, 8 bytes (This is faster than doing 16 bit add)
 	ld a, 31
