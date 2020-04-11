@@ -194,6 +194,9 @@ ENDC
 	; Add delta X
 	ld a, [PlayerX]
 	add a, e
+	jr nc, .NoOverflowX
+	dprint "Overflow X A:%A% E:%E%"
+.NoOverflowX:
 	ld [PlayerX], a
 
 	ld b, a
@@ -281,7 +284,8 @@ ENDC
 	sra a
 	ld e, a
 
-	; Add delta Y
+	; Add delta YMap
+Map
 	ld a, [PlayerY]
 	add a, e
 	ld [PlayerY], a
@@ -366,13 +370,19 @@ IsOccupiedBySolid:
 	rlca
 	rlca
 	ld h, a
-	rlca
-	and a, %00111000; These are the offset bits for Y
+	and a, %00011100; These are the offset bits for Y
+	;ld a, %11110000
+	ld a, %11110000
+	jr nz, .HasYOffset
+	and a, %11000010
+.HasYOffset:
 	ld d, a
-
 	ld a, l
 	and a, %00000111; These are the offset bits for X
-	or a, d
+	ld a, d
+	jr nz, .HasXOffset
+	and a, %10101000
+.HasXOffset:
 	ld d, a
 	ld a, l
 	rrca
@@ -384,51 +394,17 @@ IsOccupiedBySolid:
 	ld a, h
 	and a, %11100000
 	add a, l
-	;add a, (MapData&$ff)
+	;add a, (CollisionMap&$ff)
 	ld l, a
 
 	ld a, h
 	and a, %00000011
-	add a, (MapData>>8)
+	add a, (CollisionMap>>8)
 	ld h, a
 
 	; Always look at (x+0,y+0)
-	ld a, [hl+]
-	or a
-	ret nz
-
-	ld a, d
-	and a, %00000111
-	jr z, .SkipUnalignedXCheck
-	; If not grid aligned on the x axis, check also (x+1,y+0) 
 	ld a, [hl]
-	or a
-	ret nz
-.SkipUnalignedXCheck:
-	ld a, d
-	and a, %00111000
-	ret z
-
-	; Go relative to (-1, +1)
-	; 8 cycles, 8 bytes (This is faster than doing 16 bit add)
-	ld a, 31
-	add a, l
-	ld l, a
-	ld a, 0
-	adc a, h
-	ld h, a
-
-	; If not grid aligned on the y axis, check also (x+0,y+1) 
-	ld a, [hl+]
-	or a
-	ret nz
-
-	ld a, d
-	and a, %00000111
-	ret z
-	; If neither grid aligned on x nor y, check (x+1,y+1)
-	ld a, [hl]
-	or a
+	and a, d
 	ret
 
 
