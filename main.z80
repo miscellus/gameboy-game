@@ -228,12 +228,12 @@ ENDC
 	bit ButtonA, a
 	ld a, [PlayerJumpSlack]
 	jr nz, .NoJumpSlackRenew
-	ld a, %11111111
+	ld a, %00001111
 .NoJumpSlackRenew:
 	srl a
 	ld [PlayerJumpSlack], a
 	jr nc, .NoJump
-	dprint "Slack %A%"
+	;dprint "Slack %A%"
 	
 	; Check if on ground
 	ld a, [PlayerY] ; restore y
@@ -251,6 +251,8 @@ ENDC
 	ld a, [hl]
 	and a, %11000000
 	jp z, .NoJump
+	xor a
+	ld [PlayerJumpSlack], a
 	ld a, -JumpForce
 	ld [DeltaY], a
 .NoJump:
