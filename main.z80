@@ -33,7 +33,6 @@ ProgramStart:
 	ldh [rLCDC],a 	 ;LCD off
 	ldh [rSTAT],a
 
-; 	ld  a,%00011011  ;shade palette (11 10 01 00)
 	ld  a,%11100100  ;shade palette (11 10 01 00)
 	ldh [rBGP],a 	 ;setup palettes
 	ldh [rOCPD],a
@@ -45,7 +44,7 @@ ProgramStart:
 ; 	call ClearScreen
 
 
-F = (LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON)
+F = (LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON|LCDCF_OBJ16)
 	ld  a,F  ;turn on LCD, BG0, OBJ0, etc
 	ldh [rLCDC],a    ;load LCD flags
 
@@ -61,17 +60,23 @@ InitRam:
 
 	ld a, 160/2
 	ld [SprPlayer.X], a
+	add a, 8
+	ld [SprPlayer_2.X], a
 	ld a, 144/2
 	ld [SprPlayer.Y], a
+	ld [SprPlayer_2.Y], a
+	ld a, Tile_CircleCorner
+	ld [SprPlayer.Tile], a
+	ld [SprPlayer_2.Tile], a
+	ld a, (OAMF_PRI|OAMF_PAL0)
+	ld [SprPlayer.Flags], a
+	or a, OAMF_XFLIP
+	ld [SprPlayer_2.Flags], a
 
 	ld a, 80
 	ld [PlayerX], a
 	ld a, 64
 	ld [PlayerY], a
-	ld a, $1e
-	ld [SprPlayer.Tile], a
-	ld a, $8A
-	ld [SprPlayer.Flags], a
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 GameLoop:
@@ -194,9 +199,6 @@ ENDC
 	; Add delta X
 	ld a, [PlayerX]
 	add a, e
-	jr nc, .NoOverflowX
-	dprint "Overflow X A:%A% E:%E%"
-.NoOverflowX:
 	ld [PlayerX], a
 
 	ld b, a
@@ -220,31 +222,28 @@ ENDC
 	ld [DeltaX], a
 .NoCollisionX:
 
-	;ld a, [ButtonsPressed]
-	;ld c, a
+
+	ld a, [ButtonsPressed]
+	ld c, a
 	xor a
 	bit ButtonA, c
 	jr nz, .NoJump
-	ld e, a
 	; Check if on ground
-	ld a, [PlayerX]
-	ld c, a
-	ld l, a
-	ld a, [PlayerY]
-	add a, 8
-	call GetTileAddress
-	ld a, c
+	ld a, [PlayerY] ; restore y
+	ld c, a ; save y
 	and a, %111
-	ld a, [hl+]
-	jr z, .TestGrounded
-	ld c, a
+	jr nz, .NoJump ; Must be aligned with grid on Y to jump
+	ld a, b ; restore X position
+	ld l, a
+	ld a, c ; restore y
+
+	call CoordinateToMapOffset
+	add a, (CollisionMap>>8)
+	ld h, a
 	ld a, [hl]
-	or a, c
-.TestGrounded:
-	or a
-	ld a, e
+	and a, %11000000
 	jp z, .NoJump
-	sub a, JumpForce
+	ld a, -JumpForce
 	ld [DeltaY], a
 .NoJump:
 	
@@ -371,17 +370,17 @@ IsOccupiedBySolid:
 	rlca
 	ld h, a
 	and a, %00011100; These are the offset bits for Y
-	;ld a, %11110000
 	ld a, %11110000
+	;ld a, %11111111
 	jr nz, .HasYOffset
-	and a, %11000010
+	and a, %00110000
 .HasYOffset:
 	ld d, a
 	ld a, l
 	and a, %00000111; These are the offset bits for X
 	ld a, d
 	jr nz, .HasXOffset
-	and a, %10101000
+	and a, %01010000
 .HasXOffset:
 	ld d, a
 	ld a, l
@@ -409,10 +408,10 @@ IsOccupiedBySolid:
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-GetTileAddress:
+CoordinateToMapOffset:
 	; Takes: A as the Y coordinate
 	; Takes: L as the X corrdinate
-	; Returns address of underlying tile in HL
+	; Returns address of underlying tile in AL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	
 	rlca
@@ -435,8 +434,8 @@ GetTileAddress:
 	ld a, h
 	;and a, %00011100 These are the offset bits
 	and a, %00000011
-	add a, (MapData>>8)
-	ld h, a
+	;add a, (MapData>>8)
+	;ld h, a
 
 	ret
 

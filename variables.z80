@@ -28,3 +28,8 @@ SprPlayer:
 .X: db
 .Tile: db
 .Flags: db
+SprPlayer_2:
+.Y: db
+.X: db
+.Tile: db
+.Flags: db
