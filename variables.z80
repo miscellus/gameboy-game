@@ -16,6 +16,8 @@ OldPlayerY db
 DeltaX db
 DeltaY db
 
+PlayerJumpSlack db
+
 PlayerTileX db
 PlayerTileY db
 

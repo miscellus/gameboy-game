@@ -57,6 +57,7 @@ InitRam:
 	ld [PlayerNumFramesInAir], a
 	ld [DeltaX], a
 	ld [DeltaY], a
+	ld [PlayerJumpSlack], a
 
 	ld a, 160/2
 	ld [SprPlayer.X], a
@@ -224,14 +225,21 @@ ENDC
 
 
 	ld a, [ButtonsPressed]
-	ld c, a
-	xor a
-	bit ButtonA, c
-	jr nz, .NoJump
+	bit ButtonA, a
+	ld a, [PlayerJumpSlack]
+	jr nz, .NoJumpSlackRenew
+	ld a, %11111111
+.NoJumpSlackRenew:
+	srl a
+	ld [PlayerJumpSlack], a
+	jr nc, .NoJump
+	dprint "Slack %A%"
+	
 	; Check if on ground
 	ld a, [PlayerY] ; restore y
 	ld c, a ; save y
 	and a, %111
+	ld a, 0
 	jr nz, .NoJump ; Must be aligned with grid on Y to jump
 	ld a, b ; restore X position
 	ld l, a
