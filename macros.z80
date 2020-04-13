@@ -102,4 +102,6 @@ ButtonLeft equ 5
 ButtonUp equ 6
 ButtonDown equ 7
 
+BankRegister equ $2000
+
 ENDC ; JKK_MACROS

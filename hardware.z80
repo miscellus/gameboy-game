@@ -137,7 +137,7 @@ rIF EQU $FF0F
 ; -- LCDC ($FF40)
 ; -- LCD Control (R/W)
 ; --
-rLCDC EQU $FF40
+rLcdControl EQU $FF40
 
 LCDCF_OFF     EQU  %00000000 ; LCD Control Operation
 LCDCF_ON      EQU  %10000000 ; LCD Control Operation
@@ -162,7 +162,7 @@ LCDCF_BGON    EQU  %00000001 ; BG Display
 ; -- STAT ($FF41)
 ; -- LCDC Status   (R/W)
 ; --
-rSTAT EQU $FF41
+rLcdControlStatus EQU $FF41
 
 STATF_LYC     EQU  %01000000 ; LYCEQULY Coincidence (Selectable)
 STATF_MODE10  EQU  %00100000 ; Mode 10
@@ -224,7 +224,7 @@ rDMA  EQU $FF46
 ; -- Bit 3-2 - Intensity for %01
 ; -- Bit 1-0 - Intensity for %00
 ; --
-rBGP  EQU $FF47
+rBackgroundPalette  EQU $FF47
 
 
 ; --
@@ -233,7 +233,7 @@ rBGP  EQU $FF47
 ; --
 ; -- See BGP for info
 ; --
-rOBP0 EQU $FF48
+rObjectPalette0 EQU $FF48
 
 
 ; --
@@ -242,7 +242,7 @@ rOBP0 EQU $FF48
 ; --
 ; -- See BGP for info
 ; --
-rOBP1 EQU $FF49
+rObjectPalette1 EQU $FF49
 
 
 ; --
@@ -274,7 +274,7 @@ rKEY1 EQU $FF4D
 ; -- VBK ($FF4F)
 ; -- Select Video RAM Bank (R/W)
 ; --
-rVBK EQU $FF4F
+rSelectVideoRAMBank EQU $FF4F
 
 
 ; --
@@ -323,42 +323,42 @@ rRP EQU $FF56
 ; -- BCPS ($FF68)
 ; -- Background Color Palette Specification (R/W)
 ; --
-rBCPS EQU $FF68
+rBackgroundPaletteSpecification EQU $FF68
 
 
 ; --
 ; -- BCPD ($FF69)
 ; -- Background Color Palette Data (R/W)
 ; --
-rBCPD EQU $FF69
+rBackgroundPaletteData EQU $FF69
 
 
 ; --
 ; -- BCPS ($FF6A)
 ; -- Object Color Palette Specification (R/W)
 ; --
-rOCPS EQU $FF6A
+rObjectPaletteSpecification EQU $FF6A
 
 
 ; --
 ; -- BCPD ($FF6B)
 ; -- Object Color Palette Data (R/W)
 ; --
-rOCPD EQU $FF6B
+rObjectPaletteData EQU $FF6B
 
 
 ; --
 ; -- SVBK ($FF4F)
 ; -- Select Main RAM Bank (R/W)
 ; --
-rSVBK EQU $FF70
+rSelectMainRamBank EQU $FF70
 
 
 ; --
 ; -- IE ($FFFF)
 ; -- Interrupt Enable (R/W)
 ; --
-rIE EQU $FFFF
+rInterruptEnable EQU $FFFF
 
 
 IEF_HILO    EQU  %00010000 ; Transition from High to Low of Pin number P10-P13

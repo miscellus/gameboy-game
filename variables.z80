@@ -16,7 +16,7 @@ OldPlayerY db
 DeltaX db
 DeltaY db
 
-PlayerJumpSlack db
+PlayerJumpInputBuffering db
 
 PlayerTileX db
 PlayerTileY db

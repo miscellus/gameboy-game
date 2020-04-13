@@ -1,22 +1,16 @@
 ASSERTIONS EQU 0
-
-;-------------
-; gb-template - bank0.asm
-;-------------
-; Includes
-;-------------
 	
 INCLUDE "macros.z80"
 INCLUDE "hardware.z80"
 INCLUDE "header.z80"
 INCLUDE "tiles.z80"
 INCLUDE "map.z80"
+INCLUDE "HighRam.z80"
 INCLUDE "memory.z80"
+INCLUDE "bank1.z80"
 INCLUDE "variables.z80"
 
-;-------------
-; Start
-;-------------
+
 SECTION "DMA Routine",ROM0
 DMACode:
 	DB  $F5, $3E, $C1, $EA, $46, $FF, $3E, $28, $3D, $20, $FD, $F1, $D9
@@ -27,16 +21,16 @@ ProgramStart:
 	ei				 ;enable interrupts
 	ld  sp,$FFFE  ; Init stack pointer
 	ld  a,IEF_VBLANK ;enable vblank interrupt
-	ld  [rIE],a
+	ld  [rInterruptEnable], a
 
 	xor a
-	ldh [rLCDC],a 	 ;LCD off
-	ldh [rSTAT],a
+	ldh [rLcdControl],a 	 ;LCD off
+	ldh [rLcdControlStatus],a
 
 	ld  a,%11100100  ;shade palette (11 10 01 00)
-	ldh [rBGP],a 	 ;setup palettes
-	ldh [rOCPD],a
-	ldh [rOBP0],a
+	ldh [rBackgroundPalette],a 	 ;setup palettes
+	ldh [rObjectPaletteData],a
+	ldh [rObjectPalette0],a
 
 	call LoadTiles
 	call LoadMap
@@ -46,18 +40,20 @@ ProgramStart:
 
 F = (LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON|LCDCF_OBJ16)
 	ld  a,F  ;turn on LCD, BG0, OBJ0, etc
-	ldh [rLCDC],a    ;load LCD flags
+	ldh [rLcdControl],a    ;load LCD flags
 
 	rst CopyDmaResetVector
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 InitRam:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	xor a
 	ld [ButtonsDown],a
 	ld [ButtonsPressed],a
 	ld [PlayerNumFramesInAir], a
 	ld [DeltaX], a
 	ld [DeltaY], a
-	ld [PlayerJumpSlack], a
+	ld [PlayerJumpInputBuffering], a
 
 	ld a, 160/2
 	ld [SprPlayer.X], a
@@ -66,10 +62,10 @@ InitRam:
 	ld a, 144/2
 	ld [SprPlayer.Y], a
 	ld [SprPlayer_2.Y], a
-	ld a, Tile_CircleCorner
+	ld a, Tile_CircleCorner_0
 	ld [SprPlayer.Tile], a
 	ld [SprPlayer_2.Tile], a
-	ld a, (OAMF_PRI|OAMF_PAL0)
+	ld a, (0*OAMF_PRI|OAMF_PAL0)
 	ld [SprPlayer.Flags], a
 	or a, OAMF_XFLIP
 	ld [SprPlayer_2.Flags], a
@@ -226,12 +222,12 @@ ENDC
 
 	ld a, [ButtonsPressed]
 	bit ButtonA, a
-	ld a, [PlayerJumpSlack]
-	jr nz, .NoJumpSlackRenew
+	ld a, [PlayerJumpInputBuffering]
+	jr nz, .SkipJumpInputBufferRenew
 	ld a, %00001111
-.NoJumpSlackRenew:
+.SkipJumpInputBufferRenew:
 	srl a
-	ld [PlayerJumpSlack], a
+	ld [PlayerJumpInputBuffering], a
 	jr nc, .NoJump
 	;dprint "Slack %A%"
 	
@@ -244,15 +240,22 @@ ENDC
 	ld a, b ; restore X position
 	ld l, a
 	ld a, c ; restore y
-
 	call CoordinateToMapOffset
 	add a, (CollisionMap>>8)
 	ld h, a
 	ld a, [hl]
 	and a, %11000000
-	jp z, .NoJump
+	jr z, .NoJump
+	ld c, a
+	ld a, b
+	and a, %111
+	ld a, c
+	jr nz, .NoXoffset
+	and %01000000
+	jr z, .NoJump
+.NoXoffset:
 	xor a
-	ld [PlayerJumpSlack], a
+	ld [PlayerJumpInputBuffering], a
 	ld a, -JumpForce
 	ld [DeltaY], a
 .NoJump:
@@ -293,8 +296,7 @@ ENDC
 	sra a
 	ld e, a
 
-	; Add delta YMap
-Map
+	; Add delta Y
 	ld a, [PlayerY]
 	add a, e
 	ld [PlayerY], a
@@ -313,10 +315,17 @@ Map
 	and a, %11111000   ; mask off the offset to snap into grid-alignment
 	ld [PlayerY], a
 	ld b, a
-
 	xor a
 	ld [DeltaY], a
 .NoCollisionY:
+
+	ld a, [ButtonsPressed]
+	bit ButtonB, a
+	jr nz, .SkipBankSwitchTest
+	ld b, b
+	ld a, 2
+	ld [BankRegister], a
+.SkipBankSwitchTest:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 UpdateViewPort:

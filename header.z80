@@ -71,7 +71,9 @@ SECTION "Start",ROM0[$100]
 	DB	$00	; $00 - GameBoy
 
 	; $0147 (Cartridge type - all Color GameBoy cartridges are at least $19)
-	DB	$00	; $00 - ROM Only
+	DB	$19 ; $00 - ROM Only
+			; $01 - MBC1
+			; $19 - MBC5
 
 	; $0148 (ROM size)
 	DB	$00	; $00 - 256Kbit = 32Kbyte = 2 banks

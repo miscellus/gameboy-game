@@ -1,68 +1,70 @@
 SECTION "Tiles",ROM0
 
 TileData:
-Tile_Background equ 0
+Tile_Background0 equ 0
 dw $0000,$0000,$0000,$0000,$0000,$0000,$0000,$0000
-Tile_Wall_01 equ 1
+Tile_Background1 equ 1
+dw $0000,$0000,$0010,$0042,$0000,$0004,$0000,$0000
+Tile_Background2 equ 2
+dw $0000,$0000,$0008,$0004,$0000,$0000,$0010,$0010
+Tile_Wall_01 equ 3
 dw $fffe,$bfc2,$ffbe,$ffbe,$ffbe,$ffbe,$fffe,$ff01
-Tile_Wall_02 equ 2
+Tile_Wall_02 equ 4
 dw $ffff,$bfc3,$ffbf,$ffbf,$ffbf,$ffbf,$ffff,$ffff
-Tile_Wall_03 equ 3
+Tile_Wall_03 equ 5
 dw $ffff,$ffff,$ffff,$ffff,$ffff,$ffff,$ffff,$ffff
-Tile_CircleCorner equ 4
+Tile_CircleCorner_0 equ 6
 dw $0707,$1f18,$3f20,$7f40,$7f40,$ff80,$ff80,$ff80
-Tile_Player2 equ 5
+Tile_CircleCorner_1 equ 7
+dw $ff80,$ff80,$ff80,$7f40,$7f40,$3f20,$1f18,$0707
+Tile_Player2 equ 8
 dw $3c3c,$ffff,$dbff,$5a7e,$7e7e,$ffff,$ffff,$3c3c
-Tile_unused145 equ 6
-dw $fd74,$d140,$56d0,$f3e5,$858d,$9856,$6e08,$ae1a
-Tile_unused815 equ 7
-dw $d0a8,$9b8b,$9266,$521e,$9e6e,$d7e4,$5d61,$6355
-Tile_unused104 equ 8
-dw $5d4d,$b0b9,$6057,$5383,$140b,$9938,$8522,$6eae
-Tile_unused113 equ 9
-dw $9ae2,$4727,$8cd4,$1fea,$fe93,$8d99,$c78a,$bbd2
-Tile_unused805 equ 10
-dw $05ba,$efa5,$e866,$c02d,$4159,$2341,$d989,$c8e5
-Tile_unused463 equ 11
-dw $5e81,$03de,$e5c5,$aabc,$19ff,$269d,$555a,$6269
-Tile_unused439 equ 12
-dw $ee83,$23de,$5735,$4001,$cde5,$e158,$a41f,$c14f
-Tile_unused273 equ 13
-dw $a1e7,$0adf,$03c5,$05a8,$e398,$1c07,$83c6,$7dde
-Tile_unused904 equ 14
-dw $60b6,$451d,$cb79,$c073,$edb3,$e737,$b132,$380e
-Tile_unused752 equ 15
-dw $199b,$afb0,$b3c5,$5f52,$89a9,$b460,$74fc,$a078
-Tile_unused928 equ 16
-dw $e7ae,$c71d,$2ba7,$157e,$9cc9,$10ec,$0ad9,$01bf
-Tile_unused848 equ 17
-dw $fc80,$64bc,$a686,$80c8,$b5bc,$733d,$d328,$244d
-Tile_unused611 equ 18
-dw $b314,$db33,$ad60,$9e39,$04cb,$b7f3,$d121,$0b6d
-Tile_unused276 equ 19
-dw $da40,$20f3,$02e0,$0c8b,$59ac,$4ce0,$5829,$80e8
-Tile_unused242 equ 20
-dw $564f,$23dc,$8abf,$648e,$8a5d,$203a,$c8cf,$57b9
-Tile_unused043 equ 21
-dw $28c6,$4058,$5cd2,$ebbc,$0662,$4d37,$e415,$e64f
-Tile_unused039 equ 22
-dw $1e56,$5bb7,$6e40,$9fbd,$95ee,$7564,$597c,$2523
-Tile_unused686 equ 23
-dw $13e8,$ef3f,$dd73,$e3b7,$8eb9,$00f7,$6350,$652a
-Tile_unused196 equ 24
-dw $f3b4,$90b1,$9a5f,$4a39,$fd74,$401d,$6caa,$6d05
-Tile_unused893 equ 25
-dw $8134,$4c3e,$4457,$9f4b,$e601,$fc4e,$679c,$ab94
-Tile_unused619 equ 26
-dw $214a,$1f72,$8214,$c909,$f9fe,$72ad,$67d7,$c9a2
-Tile_unused812 equ 27
-dw $00ec,$939a,$c173,$6f3b,$219e,$9081,$731d,$04da
-Tile_unused471 equ 28
-dw $6fcf,$2620,$859f,$b9bb,$a27f,$84bb,$89f0,$5852
-Tile_unused044 equ 29
-dw $767a,$b794,$b8e2,$4478,$e3b5,$9af9,$59c9,$bac1
-Tile_unused007 equ 30
-dw $1429,$8e8d,$bfd5,$8819,$058c,$425b,$bce7,$6538
-Tile_Player_2 equ 31
-dw $7e7e,$ffff,$ff91,$a5ff,$a5ff,$81ff,$81ff,$7e7e
+Tile_Pattern1 equ 9
+dw $0002,$0040,$0008,$0001,$0020,$0004,$0080,$0010
+Tile_unused815 equ 10
+dw $9338,$046c,$647a,$20b7,$859e,$e410,$a3ff,$2c06
+Tile_unused113 equ 11
+dw $f5ef,$46cd,$ea90,$85ec,$e657,$cbe3,$6f93,$b513
+Tile_unused805 equ 12
+dw $fd43,$3048,$f27d,$7cac,$9d78,$ee23,$e6d0,$61f0
+Tile_unused463 equ 13
+dw $fe26,$fae7,$e92a,$a190,$8023,$0ae4,$0010,$5715
+Tile_unused439 equ 14
+dw $34cc,$c5c9,$66e0,$5ffa,$8911,$9a64,$53f9,$e6ef
+Tile_unused273 equ 15
+dw $f4e6,$6426,$f5e9,$27b0,$52f1,$166f,$82cf,$4804
+Tile_unused904 equ 16
+dw $9778,$d0a0,$183e,$f9e6,$4bf7,$470d,$970f,$f9c6
+Tile_unused752 equ 17
+dw $a476,$8040,$4961,$bd89,$efb3,$e4e5,$eca3,$f082
+Tile_unused928 equ 18
+dw $3399,$05d1,$db16,$5920,$6d97,$b817,$2443,$4618
+Tile_unused611 equ 19
+dw $f041,$4626,$c217,$6af2,$afff,$7a96,$3c73,$41ec
+Tile_unused276 equ 20
+dw $64e8,$38f8,$468b,$fb6f,$6fb7,$ad1a,$9b6d,$0dd7
+Tile_unused242 equ 21
+dw $2ecf,$3d7a,$af8b,$2dd6,$cad3,$0218,$04ca,$16a2
+Tile_unused043 equ 22
+dw $e772,$cf01,$d72b,$ce9c,$e4a9,$998d,$7830,$ff85
+Tile_unused039 equ 23
+dw $f2e2,$808b,$0044,$d95b,$8f1a,$3e19,$d824,$d862
+Tile_unused686 equ 24
+dw $9d73,$060a,$0d32,$2c9d,$dc07,$cda6,$8537,$7bbd
+Tile_unused196 equ 25
+dw $cb9f,$af2d,$9e56,$fea8,$b7bf,$a79e,$4604,$21e9
+Tile_unused893 equ 26
+dw $3a7a,$0f10,$e523,$230e,$967e,$1031,$e389,$d682
+Tile_unused619 equ 27
+dw $5d42,$a608,$7bec,$de57,$a5f7,$701e,$4131,$52b6
+Tile_unused812 equ 28
+dw $34a2,$daaf,$885a,$0717,$6b2d,$ad7f,$12b8,$25f8
+Tile_unused471 equ 29
+dw $eb4e,$601d,$ec9e,$01fb,$0373,$be77,$ef86,$6df1
+Tile_unused044 equ 30
+dw $9286,$b537,$41f9,$ae70,$6b79,$d9df,$3a03,$b958
+Tile_unused007 equ 31
+dw $585f,$07a5,$e9d5,$cfab,$e33c,$b895,$2035,$d04b
+Tile_Been equ 32
+dw $7e7e,$ff81,$ff81,$7e42,$7e42,$ff81,$ff81,$7e7e
 TileDataEnd:
