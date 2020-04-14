@@ -10,12 +10,6 @@ INCLUDE "memory.z80"
 INCLUDE "bank1.z80"
 INCLUDE "variables.z80"
 
-
-SECTION "DMA Routine",ROM0
-DMACode:
-	DB  $F5, $3E, $C1, $EA, $46, $FF, $3E, $28, $3D, $20, $FD, $F1, $D9
-DMACodeEnd:
-
 SECTION "Program Start",ROM0[$150]
 ProgramStart:
 	ei				 ;enable interrupts
@@ -62,12 +56,13 @@ InitRam:
 	ld a, 144/2
 	ld [SprPlayer.Y], a
 	ld [SprPlayer_2.Y], a
-	ld a, Tile_CircleCorner_0
+	ld a, Tile_Player_bl
 	ld [SprPlayer.Tile], a
+	ld a, Tile_Player_br
 	ld [SprPlayer_2.Tile], a
 	ld a, (0*OAMF_PRI|OAMF_PAL0)
 	ld [SprPlayer.Flags], a
-	or a, OAMF_XFLIP
+	;or a, OAMF_XFLIP
 	ld [SprPlayer_2.Flags], a
 
 	ld a, 80
@@ -245,8 +240,8 @@ ENDC
 	ld h, a
 	ld a, [hl]
 	and a, %11000000
-	jr z, .NoJump
 	ld c, a
+	jr z, .NoJump
 	ld a, b
 	and a, %111
 	ld a, c

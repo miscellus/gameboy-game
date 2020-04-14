@@ -14,57 +14,55 @@ dw $ffff,$bfc3,$ffbf,$ffbf,$ffbf,$ffbf,$ffff,$ffff
 Tile_Wall_03 equ 5
 dw $ffff,$ffff,$ffff,$ffff,$ffff,$ffff,$ffff,$ffff
 Tile_CircleCorner_0 equ 6
-dw $0707,$1f18,$3f20,$7f40,$7f40,$ff80,$ff80,$ff80
+dw $0303,$0f0c,$1f10,$3f20,$3f20,$3f20,$1f10,$1f10
 Tile_CircleCorner_1 equ 7
-dw $ff80,$ff80,$ff80,$7f40,$7f40,$3f20,$1f18,$0707
-Tile_Player2 equ 8
-dw $3c3c,$ffff,$dbff,$5a7e,$7e7e,$ffff,$ffff,$3c3c
-Tile_Pattern1 equ 9
+dw $1f10,$1f10,$3f20,$3f20,$1f10,$1f10,$0f0c,$0303
+Tile_Player_tl equ 8
+dw $0300,$0700,$0906,$0c07,$0807,$0f00,$0700,$0101
+Tile_Player_bl equ 9
+dw $0101,$0100,$0300,$0701,$0701,$0f01,$000e,$0e0e
+Tile_Player_tr equ 10
+dw $8080,$c040,$e020,$f030,$f030,$f030,$f070,$e0e0
+Tile_Player_br equ 11
+dw $c0c0,$e060,$e020,$f010,$7010,$7010,$0070,$7030
+Tile_Pattern1 equ 12
 dw $0002,$0040,$0008,$0001,$0020,$0004,$0080,$0010
-Tile_unused815 equ 10
-dw $9338,$046c,$647a,$20b7,$859e,$e410,$a3ff,$2c06
-Tile_unused113 equ 11
-dw $f5ef,$46cd,$ea90,$85ec,$e657,$cbe3,$6f93,$b513
-Tile_unused805 equ 12
-dw $fd43,$3048,$f27d,$7cac,$9d78,$ee23,$e6d0,$61f0
-Tile_unused463 equ 13
-dw $fe26,$fae7,$e92a,$a190,$8023,$0ae4,$0010,$5715
-Tile_unused439 equ 14
-dw $34cc,$c5c9,$66e0,$5ffa,$8911,$9a64,$53f9,$e6ef
-Tile_unused273 equ 15
-dw $f4e6,$6426,$f5e9,$27b0,$52f1,$166f,$82cf,$4804
-Tile_unused904 equ 16
-dw $9778,$d0a0,$183e,$f9e6,$4bf7,$470d,$970f,$f9c6
-Tile_unused752 equ 17
-dw $a476,$8040,$4961,$bd89,$efb3,$e4e5,$eca3,$f082
-Tile_unused928 equ 18
-dw $3399,$05d1,$db16,$5920,$6d97,$b817,$2443,$4618
-Tile_unused611 equ 19
-dw $f041,$4626,$c217,$6af2,$afff,$7a96,$3c73,$41ec
-Tile_unused276 equ 20
-dw $64e8,$38f8,$468b,$fb6f,$6fb7,$ad1a,$9b6d,$0dd7
-Tile_unused242 equ 21
-dw $2ecf,$3d7a,$af8b,$2dd6,$cad3,$0218,$04ca,$16a2
-Tile_unused043 equ 22
-dw $e772,$cf01,$d72b,$ce9c,$e4a9,$998d,$7830,$ff85
-Tile_unused039 equ 23
-dw $f2e2,$808b,$0044,$d95b,$8f1a,$3e19,$d824,$d862
-Tile_unused686 equ 24
-dw $9d73,$060a,$0d32,$2c9d,$dc07,$cda6,$8537,$7bbd
-Tile_unused196 equ 25
-dw $cb9f,$af2d,$9e56,$fea8,$b7bf,$a79e,$4604,$21e9
-Tile_unused893 equ 26
-dw $3a7a,$0f10,$e523,$230e,$967e,$1031,$e389,$d682
-Tile_unused619 equ 27
-dw $5d42,$a608,$7bec,$de57,$a5f7,$701e,$4131,$52b6
-Tile_unused812 equ 28
-dw $34a2,$daaf,$885a,$0717,$6b2d,$ad7f,$12b8,$25f8
-Tile_unused471 equ 29
-dw $eb4e,$601d,$ec9e,$01fb,$0373,$be77,$ef86,$6df1
-Tile_unused044 equ 30
-dw $9286,$b537,$41f9,$ae70,$6b79,$d9df,$3a03,$b958
-Tile_unused007 equ 31
-dw $585f,$07a5,$e9d5,$cfab,$e33c,$b895,$2035,$d04b
-Tile_Been equ 32
+Tile_unused815 equ 13
+dw $a5f8,$d956,$2063,$5e0f,$afda,$3c7c,$07c2,$ed69
+Tile_unused113 equ 14
+dw $066d,$c0be,$eadc,$3d5c,$b3e0,$1581,$af8e,$e66a
+Tile_unused805 equ 15
+dw $764d,$88b8,$4c68,$bb8b,$00e2,$7b3b,$3f57,$a88c
+Tile_unused463 equ 16
+dw $42ef,$a411,$71d3,$cd8e,$55ef,$11b9,$14ca,$81bb
+Tile_unused928 equ 17
+dw $48ea,$c02c,$b8d7,$11f4,$567d,$088a,$8f1b,$41e2
+Tile_unused611 equ 18
+dw $cd9e,$a651,$f674,$f346,$9cd1,$ef88,$6c0c,$209b
+Tile_unused276 equ 19
+dw $0a64,$0d55,$499f,$8778,$219e,$de49,$224f,$b611
+Tile_unused242 equ 20
+dw $a632,$e5b3,$f3e5,$cf84,$803b,$f68c,$7e92,$35c2
+Tile_unused043 equ 21
+dw $4754,$c9cf,$69b0,$6c4b,$d05e,$8e56,$5a7e,$bbe7
+Tile_unused039 equ 22
+dw $d975,$8088,$7e9e,$0827,$66f5,$7a3d,$21e9,$4d27
+Tile_unused686 equ 23
+dw $48d9,$1758,$4849,$f2d1,$c7fb,$1519,$e7ce,$aab0
+Tile_unused196 equ 24
+dw $58bf,$3ae7,$f8a5,$e098,$8c76,$b329,$56db,$5122
+Tile_unused893 equ 25
+dw $384f,$f48a,$5910,$1854,$4002,$1ec9,$946a,$54c3
+Tile_unused619 equ 26
+dw $9f0d,$0cfa,$4036,$a7a0,$df59,$17c5,$8b0e,$561b
+Tile_unused812 equ 27
+dw $addd,$80ce,$cb05,$25a1,$d069,$a451,$ff4e,$0726
+Tile_unused471 equ 28
+dw $7d2e,$5fa7,$4412,$cd95,$2123,$fccb,$f4f6,$4374
+Tile_unused044 equ 29
+dw $811a,$8c8f,$7d9a,$b89e,$f09c,$2df3,$1435,$ea83
+Tile_unused007 equ 30
+dw $02c1,$ed6c,$ee03,$3bcd,$bf28,$d5fe,$b864,$c821
+Tile_Been equ 31
 dw $7e7e,$ff81,$ff81,$7e42,$7e42,$ff81,$ff81,$7e7e
 TileDataEnd:
