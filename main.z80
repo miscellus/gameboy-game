@@ -151,7 +151,7 @@ ButtonHandle: MACRO
 .skip\@:
 ENDM
 	
-JumpForce equ 32
+JumpForce equ 28
 XSpeed equ 2
 
 	xor a
@@ -239,14 +239,14 @@ ENDC
 	add a, (CollisionMap>>8)
 	ld h, a
 	ld a, [hl]
-	and a, %11000000
+	and a, %1100;0000
 	ld c, a
 	jr z, .NoJump
 	ld a, b
 	and a, %111
 	ld a, c
 	jr nz, .NoXoffset
-	and %01000000
+	and %0100;0000
 	jr z, .NoJump
 .NoXoffset:
 	xor a
@@ -326,11 +326,11 @@ ENDC
 UpdateViewPort:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	ld a, [PlayerX]
-	sub a, 160/2 - 8
+	sub a, 160/2 - 4
 	ld [rScreenX], a
 
 	ld a, [PlayerY]
-	sub a, 144/2 - 16
+	sub a, 144/2 - 9
 	ld [rScreenY], a
 
 	call DMA ;call DMA routine in HRAM
@@ -384,17 +384,17 @@ IsOccupiedBySolid:
 	rlca
 	ld h, a
 	and a, %00011100; These are the offset bits for Y
-	ld a, %11110000
+	ld a, %1111;0000
 	;ld a, %11111111
 	jr nz, .HasYOffset
-	and a, %00110000
+	and a, %0011;0000
 .HasYOffset:
 	ld d, a
 	ld a, l
 	and a, %00000111; These are the offset bits for X
 	ld a, d
 	jr nz, .HasXOffset
-	and a, %01010000
+	and a, %0101;0000
 .HasXOffset:
 	ld d, a
 	ld a, l
