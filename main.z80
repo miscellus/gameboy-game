@@ -25,6 +25,8 @@ ProgramStart:
 	ldh [rBackgroundPalette],a 	 ;setup palettes
 	ldh [rObjectPaletteData],a
 	ldh [rObjectPalette0],a
+	ld a, %11100001
+	ldh [rObjectPalette1],a
 
 	call LoadTiles
 	call LoadMap
@@ -60,7 +62,7 @@ InitRam:
 	ld [SprPlayer.Tile], a
 	ld a, Tile_Player_br
 	ld [SprPlayer_2.Tile], a
-	ld a, (0*OAMF_PRI|OAMF_PAL0)
+	ld a, (0*OAMF_PRI|OAMF_PAL1)
 	ld [SprPlayer.Flags], a
 	;or a, OAMF_XFLIP
 	ld [SprPlayer_2.Flags], a
@@ -330,7 +332,7 @@ UpdateViewPort:
 	ld [rScreenX], a
 
 	ld a, [PlayerY]
-	sub a, 144/2 - 9
+	sub a, 144/2 - 8
 	ld [rScreenY], a
 
 	call DMA ;call DMA routine in HRAM
