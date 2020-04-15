@@ -189,11 +189,35 @@ IF 0
 	ld e, a
 ENDC
 
+	or a
+	jr z, .AddDeltaXToPosition
+	bit 7, a
+	jr z, .PointSpriteRightwards
 
+	ld a, Tile_Player_bl
+	ld [SprPlayer.Tile], a
+	ld a, Tile_Player_br
+	ld [SprPlayer_2.Tile], a
+	ld a, OAMF_PAL1
+	ld [SprPlayer.Flags], a
+	ld [SprPlayer_2.Flags], a
+
+	jr .AddDeltaXToPosition
+.PointSpriteRightwards:
+	ld a, Tile_Player_br
+	ld [SprPlayer.Tile], a
+	ld a, Tile_Player_bl
+	ld [SprPlayer_2.Tile], a
+	ld a, (OAMF_PAL1|OAMF_XFLIP)
+	ld [SprPlayer.Flags], a
+	ld [SprPlayer_2.Flags], a
+
+.AddDeltaXToPosition:
 	; Add delta X
 	ld a, [PlayerX]
 	add a, e
 	ld [PlayerX], a
+
 
 	ld b, a
 
