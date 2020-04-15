@@ -158,16 +158,39 @@ ButtonHandle: MACRO
 ENDM
 	
 JumpForce equ 28
-XSpeed equ 2
+XSpeed equ 3
 
 	xor a
 	ButtonHandle ButtonRight, add a\, XSpeed
 	ButtonHandle ButtonLeft, sub a\, XSpeed
 	ld e, a
-	
-IF 0
+
 	ld a, [DeltaX]
+	ld b, a
+	sra a
+	sra a
+	bit 7, a
+	jr z, .dsahkjdsahgdsag
+	inc a
+.dsahkjdsahgdsag:
+	sra a
+	ld d, a
+	ld a, b
+	sub a, d
 	add a, e
+	ld [DeltaX], a
+	sra a
+	sra a
+	bit 7, a
+	jr z, .dsgjkljdsakgldsag
+	inc a
+.dsgjkljdsakgldsag:
+	sra a
+	ld e, a
+
+
+IF 0
+	jr z, DeltaXNonNegative
 	; n = n - ((n + (n>0 ? 7 : 0))>>3)
 	ld l, a
 	bit 7, a
@@ -414,6 +437,16 @@ LoadMap:
 	call MemCopy
 	ret
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+Diminish:
+; Takes A, the value to diminish
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	bit 7, a
+	jr z, .NonNegative
+	inc a
+.NonNegative:
+	sra a
+	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 IsOccupiedBySolid:
