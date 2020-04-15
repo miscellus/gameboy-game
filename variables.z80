@@ -17,6 +17,7 @@ DeltaX db
 DeltaY db
 
 PlayerJumpInputBuffering db
+PlayerBuildingUpJumpForce db
 
 PlayerTileX db
 PlayerTileY db

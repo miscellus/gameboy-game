@@ -44,9 +44,8 @@ F = (LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON|LCDCF_OBJ16)
 InitRam:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	xor a
-	ld [ButtonsDown],a
-	ld [ButtonsPressed],a
 	ld [PlayerNumFramesInAir], a
+	ld [PlayerBuildingUpJumpForce], a
 	ld [DeltaX], a
 	ld [DeltaY], a
 	ld [PlayerJumpInputBuffering], a
@@ -125,12 +124,17 @@ UpdateInput:
 	and  b
 
 
-	ld  c,a ; b <- New Down state
+	ld  c,a ; New Down state
 
 	ld  a,[ButtonsDown]
+	ld l, a ; Save old button state
 	cpl
 	or c
 	ld  [ButtonsPressed],a
+	ld a, c
+	cpl
+	or l
+	ld [ButtonsReleased], a
 	ld  a, c
 	ld  [ButtonsDown],a
 
@@ -157,7 +161,6 @@ JumpForce equ 28
 XSpeed equ 2
 
 	xor a
-;	ButtonHandle ButtonDown, ld [DeltaX]\, a
 	ButtonHandle ButtonRight, add a\, XSpeed
 	ButtonHandle ButtonLeft, sub a\, XSpeed
 	ld e, a
@@ -289,6 +292,7 @@ ENDC
 	inc e
 	inc e
 
+
 	ld a, [DeltaY]
 	add a, e
 	; n = n - ((n + (n>0 ? 7 : 0))>>3)
@@ -310,12 +314,24 @@ ENDC
 	sub a, d
 
 	dec a ; Limit DeltaY
+
 	
 	ld [DeltaY], a
 	sra a
 	sra a
 	sra a
 	ld e, a
+
+	ld a, [ButtonsReleased]
+	bit ButtonA, a
+	jr nz, .SkipStopJump
+	bit 7, e
+	jr z, .SkipStopJump
+	ld a, e
+	sra a
+	ld e, a
+	ld [DeltaY], a
+.SkipStopJump:
 
 	; Add delta Y
 	ld a, [PlayerY]
