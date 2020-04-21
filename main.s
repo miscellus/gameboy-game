@@ -1,14 +1,14 @@
 ASSERTIONS EQU 0
 	
-INCLUDE "macros.z80"
-INCLUDE "hardware.z80"
-INCLUDE "header.z80"
-INCLUDE "tiles.z80"
-INCLUDE "map.z80"
-INCLUDE "HighRam.z80"
-INCLUDE "memory.z80"
-INCLUDE "bank1.z80"
-INCLUDE "variables.z80"
+INCLUDE "macros.s"
+INCLUDE "hardware.s"
+INCLUDE "header.s"
+INCLUDE "tiles.s"
+INCLUDE "map.s"
+INCLUDE "HighRam.s"
+INCLUDE "memory.s"
+INCLUDE "bank1.s"
+INCLUDE "variables.s"
 
 SECTION "Program Start",ROM0[$150]
 ProgramStart:
