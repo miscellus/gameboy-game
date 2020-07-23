@@ -1,5 +1,5 @@
 #!/bin/bash
-python genmap.py > map.s
+# python genmap.py > map.s
 #python gentiles.py > tiles.s
 rgbasm -o main.obj main.s && \
 rgblink -m main.map -n main.sym -o main.gb main.obj && \

@@ -36,7 +36,6 @@
 00:0384 IsOccupiedBySolid.HasXOffset
 00:039a CoordinateToMapOffset
 00:0400 MapData
-00:0800 CollisionMap
 00:0c00 TileData
 00:c000 IsWaitingForVBlank
 00:c100 SprPlayer.Y

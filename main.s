@@ -1,5 +1,5 @@
 ASSERTIONS EQU 0
-	
+
 INCLUDE "macros.s"
 INCLUDE "hardware.s"
 INCLUDE "header.s"
@@ -94,7 +94,7 @@ GameLoop:
 	ld a, [VBlankCount]
 	inc a
 	ld [VBlankCount], a
-	
+
 ;;;;;;;;;;;;;;;;;;;
 UpdateInput:
 ;
@@ -114,7 +114,7 @@ UpdateInput:
 	ld  b,a ; Save D-Pad states in register b
 
 	ld  a,JoyPad_Select_Other
-	ldh  [JoyPad],a  
+	ldh  [JoyPad],a
 	ldh  a,[JoyPad]
 	ldh  a,[JoyPad]
 	ldh  a,[JoyPad]
@@ -156,7 +156,7 @@ ButtonHandle: MACRO
 	\2
 .skip\@:
 ENDM
-	
+
 JumpForce equ 28
 XSpeed equ 3
 
@@ -277,7 +277,7 @@ ENDC
 	ld [PlayerJumpInputBuffering], a
 	jr nc, .NoJump
 	;dprint "Slack %A%"
-	
+
 	; Check if on ground
 	ld a, [PlayerY] ; restore y
 	ld c, a ; save y
@@ -288,7 +288,7 @@ ENDC
 	ld l, a
 	ld a, c ; restore y
 	call CoordinateToMapOffset
-	add a, (CollisionMap>>8)
+	add a, ((MapData + 1024)>>8)
 	ld h, a
 	ld a, [hl]
 	and a, %1100;0000
@@ -306,7 +306,7 @@ ENDC
 	ld a, -JumpForce
 	ld [DeltaY], a
 .NoJump:
-	
+
 	;ButtonHandle ButtonDown, add a\, Speed
 
 
@@ -338,7 +338,7 @@ ENDC
 
 	dec a ; Limit DeltaY
 
-	
+
 	ld [DeltaY], a
 	sra a
 	sra a
@@ -360,7 +360,7 @@ ENDC
 	ld a, [PlayerY]
 	add a, e
 	ld [PlayerY], a
-	
+
 	ld l, b ; Current X coordinate
 	ld b, a ; Candidate Y corrdinate
 	call IsOccupiedBySolid;(l,a)
@@ -433,7 +433,7 @@ LoadMap:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	ld  hl, MapData  ;same as LoadTiles
 	ld  de, _SCRN0
-	ld  bc, (MapDataEnd-MapData)
+	ld  bc, (1024)
 	call MemCopy
 	ret
 
@@ -482,12 +482,12 @@ IsOccupiedBySolid:
 	ld a, h
 	and a, %11100000
 	add a, l
-	;add a, (CollisionMap&$ff)
+	;add a, ((MapData + 1024)&$ff)
 	ld l, a
 
 	ld a, h
 	and a, %00000011
-	add a, (CollisionMap>>8)
+	add a, ((MapData + 1024)>>8)
 	ld h, a
 
 	; Always look at (x+0,y+0)
@@ -502,11 +502,11 @@ CoordinateToMapOffset:
 	; Takes: L as the X corrdinate
 	; Returns address of underlying tile in AL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-	
+
 	rlca
 	rlca
 	ld h, a
-	
+
 	ld a, l
 	rrca
 	rrca
@@ -569,7 +569,7 @@ PositionToMapDataOffset:
 	rlca
 	rlca
 	ld d, a
-	
+
 	ld a, e
 	rrca
 	rrca
