@@ -8,21 +8,21 @@ ButtonsDown: db
 ButtonsPressed: db
 ButtonsReleased: db
 
-PlayerX db
-PlayerY db
-OldPlayerX db
-OldPlayerY db
+PlayerX: db
+PlayerY: db
+OldPlayerX: db
+OldPlayerY: db
 
-DeltaX db
-DeltaY db
+DeltaX: db
+DeltaY: db
 
-PlayerJumpInputBuffering db
-PlayerBuildingUpJumpForce db
+PlayerJumpInputBuffering: db
+PlayerBuildingUpJumpForce: db
 
-PlayerTileX db
-PlayerTileY db
+PlayerTileX: db
+PlayerTileY: db
 
-PlayerNumFramesInAir db
+PlayerNumFramesInAir: db
 
 SECTION "OAM Work Memory",WRAM0,ALIGN[8]
 Sprites:

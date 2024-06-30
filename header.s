@@ -2,7 +2,7 @@
 ;	Header
 ;-------------
 
-DMA equ $FF80
+DEF DMA EQU $FF80
 
 SECTION "Copy Data",ROM0[$28] ;copy DMA routine to HRAM
 CopyDmaResetVector:

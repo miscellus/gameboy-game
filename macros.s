@@ -1,39 +1,9 @@
 IF !DEF(JKK_MACROS)
-JKK_MACROS SET 1
-
-Increment: MACRO
-	ld  a, [\1]
-	inc a
-	ld  [\1], a
-ENDM
-
-AddTo: MACRO
-	ld  a, [\1]
-	add a, \2
-	ld [\1], a
-ENDM
-
-Decrement: MACRO
-	ld  a, [\1]
-	dec a
-	ld  [\1], a
-ENDM
-
-LeafCall: MACRO
-	ld hl, .return\@
-	jp \1
-.return\@
-ENDM
-
-LeafCallRelative: MACRO
-	ld hl, .return\@
-	jr \1
-.return\@
-ENDM
+DEF JKK_MACROS = 1
 
 ; Prints a message to the no$gmb / bgb debugger
 ; Accepts a string as input, see emulator doc for support
-dprint: MACRO
+MACRO dprint
 	ld  d, d
 	jr .end\@
 	DW $6464
@@ -44,28 +14,28 @@ ENDM
 
 IF ASSERTIONS
 
-assertz: MACRO
+MACRO assertz
 	jr z, .End\@
 	dprint \1
 	die
 .End\@
 ENDM
 
-assertnz: MACRO
+MACRO assertnz
 	jr nz, .End\@
 	dprint \1
 	die
 .End\@
 ENDM
 
-assertc: MACRO
+MACRO assertc
 	jr c, .End\@
 	dprint \1
 	die
 .End\@
 ENDM
 
-assertnc: MACRO
+MACRO assertnc
 	jr nc, .End\@
 	dprint \1
 	die
@@ -73,35 +43,39 @@ assertnc: MACRO
 ENDM
 
 ELSE
-assertz: MACRO ENDM
-assertnz: MACRO ENDM
-assertc: MACRO ENDM
-assertnc: MACRO ENDM
+MACRO assertz
+ENDM
+MACRO assertnz
+ENDM
+MACRO assertc
+ENDM
+MACRO assertnc
+ENDM
 
 ENDC; DEF(ASSERTIONS) 
 
-die: MACRO
+MACRO die
 .DieLoop\@
 	halt
 	nop
 	jr .DieLoop\@
 ENDM
 
-skipz: MACRO
+MACRO skipz
 	jr z, .end\@
 	\1,\2,\3,\4,\5,\6,\7,\8,\9
 .end\@
 ENDM
 
-ButtonA equ 0
-ButtonB equ 1
-ButtonSelect equ 2
-ButtonStart equ 3
-ButtonRight equ 4
-ButtonLeft equ 5
-ButtonUp equ 6
-ButtonDown equ 7
+DEF ButtonA EQU 0
+DEF ButtonB EQU 1
+DEF ButtonSelect EQU 2
+DEF ButtonStart EQU 3
+DEF ButtonRight EQU 4
+DEF ButtonLeft EQU 5
+DEF ButtonUp EQU 6
+DEF ButtonDown EQU 7
 
-BankRegister equ $2000
+DEF BankRegister EQU $2000
 
 ENDC ; JKK_MACROS

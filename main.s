@@ -1,4 +1,4 @@
-ASSERTIONS EQU 0
+DEF ASSERTIONS = 0
 
 INCLUDE "macros.s"
 INCLUDE "hardware.s"
@@ -34,7 +34,7 @@ ProgramStart:
 ; 	call ClearScreen
 
 
-F = (LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON|LCDCF_OBJ16)
+DEF F = (LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON|LCDCF_OBJ16)
 	ld  a,F  ;turn on LCD, BG0, OBJ0, etc
 	ldh [rLcdControl],a    ;load LCD flags
 
@@ -150,15 +150,15 @@ UpdatePlayerPosition:
 ; Assert c contains ButtonsPressed
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-ButtonHandle: MACRO
+MACRO ButtonHandle
 	bit \1, c
 	jr nz, .skip\@
 	\2
 .skip\@:
 ENDM
 
-JumpForce equ 28
-XSpeed equ 3
+DEF JumpForce equ 28
+DEF XSpeed equ 3
 
 	xor a
 	ButtonHandle ButtonRight, add a\, XSpeed
@@ -305,6 +305,7 @@ ENDC
 	ld [PlayerJumpInputBuffering], a
 	ld a, -JumpForce
 	ld [DeltaY], a
+	call PlayTestSound
 .NoJump:
 
 	;ButtonHandle ButtonDown, add a\, Speed
@@ -589,3 +590,9 @@ PositionToMapDataOffset:
 	; Note since leaf function, jump to explicit return address
 	jp hl
 PositionToMapDataOffsetEnd:
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PlayTestSound:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	ret
