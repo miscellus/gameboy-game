@@ -267,94 +267,32 @@ UpdateInput:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 UpdatePlayer:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-    DEF JumpForce equ 28
-    DEF XSpeed equ 3
-
-    ld a, [ButtonsDown]
-    ld c, a
-
-    ; Compute X input
-    ;
-	xor a
-
-	bit ButtonRight, c
-	jr nz, :+
-	add a, XSpeed
-:
-
-	bit ButtonLeft, c
-	jr nz, :+
-	add a, -XSpeed
-:
-	
+    
+    call GetPlayerXInput
     ld e, a ; Save xSpeed in e
 
-IF 0
-    pusha
-    ld hl, DebugStack
-    ld [hl], a
-    ld d, h
-    ld e, l
-    printf "Desired X speed: %hd"
-    popa
-ENDC
-
-
-	ld a, [DeltaX]
-	ld b, a
-	sra a
-	sra a
-
-    ; Add 1 to deltaX if going left
-	bit 7, a
-	jr z, .deltaXIsNotNegative
-	inc a
-.deltaXIsNotNegative:
-
-	sra a
-
     ; DeltaX += Xspeed - DeltaX/8
+    ld hl, DeltaX
+	ld a, [hl]
 	ld d, a
-	ld a, b 
+	sra d
+	sra d
+	sra d
 	sub a, d
 	add a, e
+	ld [hl], a
 
-	ld [DeltaX], a
-
+    ; E <- ((A >> 2) + ((A < 0) ? 1 : 0)) >> 1
 	sra a
 	sra a
 	bit 7, a
-	jr z, .dsgjkljdsakgldsag
+	jr z, :+
 	inc a
-.dsgjkljdsakgldsag:
+:
 	sra a
 	ld e, a
 
-	or a
-	jr z, .AddDeltaXToPosition
-	bit 7, a
-	jr z, .PointSpriteRightwards
-
-	ld a, Tile_Player_bl
-	ld [SprPlayer.Tile], a
-	ld a, Tile_Player_br
-	ld [SprPlayer_2.Tile], a
-	ld a, OAMF_PAL1
-	ld [SprPlayer.Flags], a
-	ld [SprPlayer_2.Flags], a
-
-	jr .AddDeltaXToPosition
-.PointSpriteRightwards:
-	ld a, Tile_Player_br
-	ld [SprPlayer.Tile], a
-	ld a, Tile_Player_bl
-	ld [SprPlayer_2.Tile], a
-	ld a, (OAMF_PAL1|OAMF_XFLIP)
-	ld [SprPlayer.Flags], a
-	ld [SprPlayer_2.Flags], a
-
-.AddDeltaXToPosition:
+    call FlipPlayerSprite
 	; Add delta X
 	ld a, [PlayerX]
 	add a, e
@@ -517,4 +455,62 @@ UpdateViewPort:
 	call HRAM_DmaRoutine
 
     ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+GetPlayerXInput:
+;   Results: A <- Player X input
+;   Clobbers: C
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+DEF JumpForce equ 28
+DEF XSpeed equ 3
+
+    ld a, [ButtonsDown]
+    ld c, a
+
+	xor a
+
+	bit ButtonRight, c
+	jr nz, :+
+	add a, XSpeed
+:
+
+	bit ButtonLeft, c
+	jr nz, :+
+	add a, -XSpeed
+:
+    ret
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+FlipPlayerSprite:
+; Takes: A as DeltaX
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	or a
+	ret z ; Don't flip sprite if DeltaX == 0
+
+    push af
+	bit 7, a
+	jr z, .FlipRight
+
+.FlipLeft:
+	ld a, Tile_Player_bl
+	ld [SprPlayer.Tile], a
+	ld a, Tile_Player_br
+	ld [SprPlayer_2.Tile], a
+	ld a, OAMF_PAL1
+	ld [SprPlayer.Flags], a
+	ld [SprPlayer_2.Flags], a
+    pop af
+	ret
+
+    ; Flip Right
+.FlipRight:
+	ld a, Tile_Player_br
+	ld [SprPlayer.Tile], a
+	ld a, Tile_Player_bl
+	ld [SprPlayer_2.Tile], a
+	ld a, (OAMF_PAL1|OAMF_XFLIP)
+	ld [SprPlayer.Flags], a
+	ld [SprPlayer_2.Flags], a
+    pop af
+    ret
+
 

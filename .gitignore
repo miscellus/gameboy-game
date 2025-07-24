@@ -8,3 +8,4 @@ Backups/
 *.SYM
 *.sym
 
+build_files/
