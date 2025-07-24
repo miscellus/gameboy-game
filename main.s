@@ -5,9 +5,8 @@ INCLUDE "hardware.s"
 INCLUDE "header.s"
 INCLUDE "tiles.s"
 INCLUDE "map.s"
-INCLUDE "HighRam.s"
+INCLUDE "high_ram.s"
 INCLUDE "memory.s"
-INCLUDE "bank1.s"
 INCLUDE "variables.s"
 
 SECTION "Program Start",ROM0[$150]
@@ -267,10 +266,9 @@ UpdateInput:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 UpdatePlayer:
-; Assert c contains ButtonsPressed
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-DEF JumpForce equ 28
+    DEF JumpForce equ 28
     DEF XSpeed equ 3
 
     ld a, [ButtonsDown]
@@ -516,7 +514,7 @@ UpdateViewPort:
 	sub a, 144/2 - 8
 	ld [rScreenY], a
 
-	call DMA ;call DMA routine in HRAM
+	call HRAM_DmaRoutine
 
     ret
 

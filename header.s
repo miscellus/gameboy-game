@@ -2,22 +2,20 @@
 ;	Header
 ;-------------
 
-DEF DMA EQU $FF80
-
 SECTION "Copy Data",ROM0[$28] ;copy DMA routine to HRAM
 CopyDmaResetVector:
-; 	ld de, $FF80 ;Hi mem address of DMACode
-	ld hl, DMACode
-	ld c, $80
-	ld b, DMACodeEnd-DMACode
-.loop
+	ld hl, StoredDma
+	ld c, HRAM_BASE ; Offset in high ram for the DMA routine
+	ld b, StoredDma.End-StoredDma
+.loop:
 	ld a,[hl+]
 	ld [$ff00+c], a
 	inc c
 	dec b
-	jr nz,.loop
+	jr nz, .loop
 	reti
-; 
+
+
 SECTION "VBlank IRQ",ROM0[$40]
 VBlankResetVector:
 	xor  a
@@ -39,12 +37,6 @@ SerialResetVector:
 SECTION	"Joypad IRQ Vector",ROM0[$60]
 JoyPadResetVector:
 	reti
-
-SECTION "Stored DMA Routine", ROM0
-DMACode:
-	DB  $F5, $3E, $C1, $EA, $46, $FF, $3E, $28, $3D, $20, $FD, $F1, $D9
-DMACodeEnd:
-
 
 SECTION "Header",ROM0[$100]
 	nop
