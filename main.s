@@ -271,7 +271,7 @@ UpdatePlayer:
     call GetPlayerXInput
     ld e, a ; Save xSpeed in e
 
-    ; DeltaX += Xspeed - DeltaX/8
+    ; DeltaX += XInput - DeltaX/8
     ld hl, DeltaX
 	ld a, [hl]
 	ld d, a
@@ -282,15 +282,16 @@ UpdatePlayer:
 	add a, e
 	ld [hl], a
 
-    ; E <- ((A >> 2) + ((A < 0) ? 1 : 0)) >> 1
+
+    ; Get integer part of DeltaX (5.3 fixed point)
 	sra a
 	sra a
 	bit 7, a
 	jr z, :+
-	inc a
+	dec a
 :
 	sra a
-	ld e, a
+	ld e, a ; E <- DeltaX integer part
 
     call FlipPlayerSprite
 	; Add delta X
@@ -512,5 +513,4 @@ FlipPlayerSprite:
 	ld [SprPlayer_2.Flags], a
     pop af
     ret
-
 
