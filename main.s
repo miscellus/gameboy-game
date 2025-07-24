@@ -39,7 +39,7 @@ ProgramStart:
 	rst CopyDmaResetVector
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-InitRam:
+; InitRam:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	xor a
 	ld [DeltaX], a
@@ -75,13 +75,137 @@ GameLoop:
 ;     3) Update the player's position (handling collisions)
 ;     4) Doing the DMA transfer to the pixel processing unit (PPU)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-.WaitForVBlank:
+    call WaitForVBlank
+    call UpdateInput
+    call UpdatePlayer
+    call UpdateViewPort
+	jr GameLoop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ClearSprites:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	ld  hl, Sprites
+	xor a
+	ld  c, 4*40
+	call MemFill255
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ClearScreen:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	ld  hl, _SCRN0    ;load map0 ram
+	xor a
+	ld  bc, 1024
+	call MemFill
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LoadTiles:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	ld  hl, TileData
+	ld  de, _VRAM
+	ld  bc, (TileDataEnd-TileData)
+	call MemCopy
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LoadMap:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	ld  hl, MapData  ;same as LoadTiles
+	ld  de, _SCRN0
+	ld  bc, (1024)
+	call MemCopy
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+IsOccupiedBySolid:
+; Takes: A as the Y coordinate
+; Takes: L as the X corrdinate
+; Returns: If occupied in the zero flag (ZF=1 means occupied)
+; Clobbers: A, D, H, L, F
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	rlca
+	rlca
+	ld h, a
+	and a, %00011100; These are the offset bits for Y
+	ld a, %1111;0000
+	;ld a, %11111111
+	jr nz, .HasYOffset
+	and a, %0011;0000
+.HasYOffset:
+	ld d, a
+	ld a, l
+	and a, %00000111; These are the offset bits for X
+	ld a, d
+	jr nz, .HasXOffset
+	and a, %0101;0000
+.HasXOffset:
+	ld d, a
+	ld a, l
+	rrca
+	rrca
+	rrca
+	and a, %00011111
+	ld l, a
+
+	ld a, h
+	and a, %11100000
+	add a, l
+	;add a, MapData & 0xff
+	ld l, a
+
+	ld a, h
+	and a, %00000011
+	add a, CollisionMap>>8
+	ld h, a
+
+	; Always look at (x+0,y+0)
+	ld a, [hl]
+	and a, d
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CoordinateToMapOffset:
+	; Takes: A as the Y coordinate
+	; Takes: L as the X corrdinate
+	; Returns address of underlying tile in AL
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	rlca
+	rlca
+	ld h, a
+
+	ld a, l
+	rrca
+	rrca
+	rrca
+	and a, %00011111
+	ld l, a
+
+	ld a, h
+	and a, %11100000
+	add a, l
+	;add a, (MapData&$ff)
+	ld l, a
+
+	ld a, h
+	;and a, %00011100 These are the offset bits
+	and a, %00000011
+	;add a, (MapData>>8)
+	;ld h, a
+
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+WaitForVBlank:
+; Waits for VBlank, and increments VBlankCount
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	halt ; @HardwareBug:
 	nop ; If interrupts are disabled, HALT jumps one instruction!
 
 	ld a, [IsWaitingForVBlank]
 	or a
-	jr nz, .WaitForVBlank ; zero means vblank has happened
+	jr nz, WaitForVBlank ; zero means vblank has happened
 
 	; Here a should be zero, so increment to 1 to signify wait for vblank
 	inc a
@@ -90,6 +214,8 @@ GameLoop:
 	ld a, [VBlankCount]
 	inc a
 	ld [VBlankCount], a
+
+    ret
 
 ;;;;;;;;;;;;;;;;;;;
 UpdateInput:
@@ -136,10 +262,8 @@ UpdateInput:
 
 	ld  a, JoyPad_Select_Other|JoyPad_Select_DPad
 	ld  [JoyPad], a
-
-
-	;;; Intended fall through ;;;
-
+    
+    ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 UpdatePlayer:
@@ -147,7 +271,10 @@ UpdatePlayer:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 DEF JumpForce equ 28
-DEF XSpeed equ 8
+    DEF XSpeed equ 3
+
+    ld a, [ButtonsDown]
+    ld c, a
 
     ; Compute X input
     ;
@@ -278,7 +405,7 @@ ENDC
 	ld l, a
 	ld a, c ; restore y
 	call CoordinateToMapOffset
-	add a, ((MapData + 1024)>>8)
+	add a, CollisionMap >> 8
 	ld h, a
 	ld a, [hl]
 	and a, %1100;0000
@@ -295,7 +422,6 @@ ENDC
 	ld [PlayerJumpInputBuffering], a
 	ld a, -JumpForce
 	ld [DeltaY], a
-	call PlayTestSound
 .NoJump:
 
 	;ButtonHandle ButtonDown, add a\, Speed
@@ -377,6 +503,8 @@ ENDC
 	ld [BankRegister], a
 .SkipBankSwitchTest:
 
+    ret
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 UpdateViewPort:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -389,187 +517,6 @@ UpdateViewPort:
 	ld [rScreenY], a
 
 	call DMA ;call DMA routine in HRAM
-	jp GameLoop
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-ClearSprites:
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-	ld  hl, Sprites
-	xor a
-	ld  c, 4*40
-	call MemFill255
-	ret
+    ret
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-ClearScreen:
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-	ld  hl, _SCRN0    ;load map0 ram
-	xor a
-	ld  bc, 1024
-	call MemFill
-	ret
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-LoadTiles:
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-	ld  hl, TileData
-	ld  de, _VRAM
-	ld  bc, (TileDataEnd-TileData)
-	call MemCopy
-	ret
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-LoadMap:
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-	ld  hl, MapData  ;same as LoadTiles
-	ld  de, _SCRN0
-	ld  bc, (1024)
-	call MemCopy
-	ret
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-IsOccupiedBySolid:
-; Takes: A as the Y coordinate
-; Takes: L as the X corrdinate
-; Returns: If occupied in the zero flag (ZF=1 means occupied)
-; Clobbers: A, D, H, L, F
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-	rlca
-	rlca
-	ld h, a
-	and a, %00011100; These are the offset bits for Y
-	ld a, %1111;0000
-	;ld a, %11111111
-	jr nz, .HasYOffset
-	and a, %0011;0000
-.HasYOffset:
-	ld d, a
-	ld a, l
-	and a, %00000111; These are the offset bits for X
-	ld a, d
-	jr nz, .HasXOffset
-	and a, %0101;0000
-.HasXOffset:
-	ld d, a
-	ld a, l
-	rrca
-	rrca
-	rrca
-	and a, %00011111
-	ld l, a
-
-	ld a, h
-	and a, %11100000
-	add a, l
-	;add a, MapData & 0xff
-	ld l, a
-
-	ld a, h
-	and a, %00000011
-	add a, CollisionMap>>8
-	ld h, a
-
-	; Always look at (x+0,y+0)
-	ld a, [hl]
-	and a, d
-	ret
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-CoordinateToMapOffset:
-	; Takes: A as the Y coordinate
-	; Takes: L as the X corrdinate
-	; Returns address of underlying tile in AL
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-	rlca
-	rlca
-	ld h, a
-
-	ld a, l
-	rrca
-	rrca
-	rrca
-	and a, %00011111
-	ld l, a
-
-	ld a, h
-	and a, %11100000
-	add a, l
-	;add a, (MapData&$ff)
-	ld l, a
-
-	ld a, h
-	;and a, %00011100 These are the offset bits
-	and a, %00000011
-	;add a, (MapData>>8)
-	;ld h, a
-
-	ret
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-GetTile_Old:
-	; a = TileY
-	; e = TileX
-	; d = 0
-	; result in a
-	; Clobbers af, hl
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-	push de
-
-	ld hl, MapData
-	add hl, de
-
-	; DE <- A*32
-	swap a
-	rlca
-	ld e, a
-	and a, %00011111
-	ld d, a
-	ld a, e
-	and a, %11100000
-	ld e, a
-
-	add hl, de
-
-	ld a, [hl]
-	pop de
-	ret
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-PositionToMapDataOffset:
-	; (LeafCall)
-	; Takes: an X,Y coordinate in registers E (for X) and A (for Y)
-	; Takes: EXPLICIT return address in HL
-	; Returns: the corresponding offset into a 32x32 tile map in DE
-	; Clobbers: D
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-	rlca
-	rlca
-	ld d, a
-
-	ld a, e
-	rrca
-	rrca
-	rrca
-	and a, %00011111
-	ld e, a
-
-	ld a, d
-	and a, %11100000
-	add a, e
-	ld e, a
-
-	ld a, d
-	;and a, %00011100 These are the offset bits
-	and a, %00000011
-	ld d, a
-	; Note since leaf function, jump to explicit return address
-	jp hl
-PositionToMapDataOffsetEnd:
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-PlayTestSound:
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-	ret
