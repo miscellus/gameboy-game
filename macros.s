@@ -1,6 +1,20 @@
 IF !DEF(JKK_MACROS)
 DEF JKK_MACROS = 1
 
+MACRO pusha
+    push af
+    push de
+    push hl
+    push bc
+ENDM
+
+MACRO popa
+    pop bc
+    pop hl
+    pop de
+    pop af
+ENDM
+
 ; Prints a message to the no$gmb / bgb debugger
 ; Accepts a string as input, see emulator doc for support
 MACRO dprint
@@ -10,6 +24,21 @@ MACRO dprint
 	DW $0000
 	DB \1
 .end\@:
+ENDM
+
+; printf expects the data to be pointed to by DE
+MACRO printf
+    push hl
+    ld hl, .Fmt\@
+    ld d, d
+    jr .End\@
+    dw $6464
+    dw $0200
+.End\@:
+    pop hl
+    jr :+
+.Fmt\@: db \1, 0
+:
 ENDM
 
 IF ASSERTIONS

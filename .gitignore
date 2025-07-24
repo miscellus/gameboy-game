@@ -1,6 +1,10 @@
 Backups/
 *.MAP
-*.SYM
-*.sn1
-*.obj
 *.map
+*.OBJ
+*.obj
+*.SN1
+*.sn1
+*.SYM
+*.sym
+

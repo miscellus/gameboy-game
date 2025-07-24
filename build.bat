@@ -1,6 +1,7 @@
-SET RGBPATH=..\rgbds-0-3-7
-SET BGBPATH=..\BGB
-%RGBPATH%\rgbasm.exe -o main.obj main.gbz80 && ^
-%RGBPATH%\rgblink.exe -m main.map -n main.sym -o main.gb main.obj && ^
-%RGBPATH%\rgbfix.exe -p 0 -v main.gb && ^
-%BGBPATH%\bgb.exe main.gb
+SET RGBPATH=tools\rgbds
+SET BGBPATH=tools\bgb
+SET OUTPATH=build_files
+%RGBPATH%\rgbasm.exe -o %OUTPATH%\main.obj main.s && ^
+%RGBPATH%\rgblink.exe -m %OUTPATH%\main.map -n %OUTPATH%\main.sym -o %OUTPATH%\main.gb %OUTPATH%\main.obj && ^
+%RGBPATH%\rgbfix.exe -p 0 -v %OUTPATH%\main.gb && ^
+%BGBPATH%\bgb.exe %OUTPATH%\main.gb

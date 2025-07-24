@@ -31,11 +31,9 @@ ProgramStart:
 	call LoadTiles
 	call LoadMap
 	call ClearSprites
-; 	call ClearScreen
+	; call ClearScreen
 
-
-DEF F = (LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON|LCDCF_OBJ16)
-	ld  a,F  ;turn on LCD, BG0, OBJ0, etc
+	ld  a,(LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON|LCDCF_OBJ16) ;turn on LCD, BG0, OBJ0, etc
 	ldh [rLcdControl],a    ;load LCD flags
 
 	rst CopyDmaResetVector
@@ -44,8 +42,6 @@ DEF F = (LCDCF_ON|LCDCF_WIN9C00|LCDCF_BG8000|LCDCF_OBJON|LCDCF_BGON|LCDCF_OBJ16)
 InitRam:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	xor a
-	ld [PlayerNumFramesInAir], a
-	ld [PlayerBuildingUpJumpForce], a
 	ld [DeltaX], a
 	ld [DeltaY], a
 	ld [PlayerJumpInputBuffering], a
@@ -146,39 +142,61 @@ UpdateInput:
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-UpdatePlayerPosition:
+UpdatePlayer:
 ; Assert c contains ButtonsPressed
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-MACRO ButtonHandle
-	bit \1, c
-	jr nz, .skip\@
-	\2
-.skip\@:
-ENDM
-
 DEF JumpForce equ 28
-DEF XSpeed equ 3
+DEF XSpeed equ 8
 
+    ; Compute X input
+    ;
 	xor a
-	ButtonHandle ButtonRight, add a\, XSpeed
-	ButtonHandle ButtonLeft, sub a\, XSpeed
-	ld e, a
+
+	bit ButtonRight, c
+	jr nz, :+
+	add a, XSpeed
+:
+
+	bit ButtonLeft, c
+	jr nz, :+
+	add a, -XSpeed
+:
+	
+    ld e, a ; Save xSpeed in e
+
+IF 0
+    pusha
+    ld hl, DebugStack
+    ld [hl], a
+    ld d, h
+    ld e, l
+    printf "Desired X speed: %hd"
+    popa
+ENDC
+
 
 	ld a, [DeltaX]
 	ld b, a
 	sra a
 	sra a
+
+    ; Add 1 to deltaX if going left
 	bit 7, a
-	jr z, .dsahkjdsahgdsag
+	jr z, .deltaXIsNotNegative
 	inc a
-.dsahkjdsahgdsag:
+.deltaXIsNotNegative:
+
 	sra a
+
+    ; DeltaX += Xspeed - DeltaX/8
 	ld d, a
-	ld a, b
+	ld a, b 
 	sub a, d
 	add a, e
+
 	ld [DeltaX], a
+
 	sra a
 	sra a
 	bit 7, a
@@ -187,33 +205,6 @@ DEF XSpeed equ 3
 .dsgjkljdsakgldsag:
 	sra a
 	ld e, a
-
-
-IF 0
-	jr z, DeltaXNonNegative
-	; n = n - ((n + (n>0 ? 7 : 0))>>3)
-	ld l, a
-	bit 7, a
-	jr nz, .NonPositiveDeltaX
-	or a
-	jr z, .NonPositiveDeltaX
-	; a > 0
-	add a, 15
-.NonPositiveDeltaX:
-	sra a
-	sra a
-	sra a
-	sra a
-	ld d, a
-	ld a, l
-	sub a, d
-
-	ld [DeltaX], a
-	sra a
-	sra a
-	sra a
-	ld e, a
-ENDC
 
 	or a
 	jr z, .AddDeltaXToPosition
@@ -243,7 +234,6 @@ ENDC
 	ld a, [PlayerX]
 	add a, e
 	ld [PlayerX], a
-
 
 	ld b, a
 
@@ -315,7 +305,6 @@ ENDC
 	inc e
 	inc e
 	inc e
-
 
 	ld a, [DeltaY]
 	add a, e
@@ -439,17 +428,6 @@ LoadMap:
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-Diminish:
-; Takes A, the value to diminish
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-	bit 7, a
-	jr z, .NonNegative
-	inc a
-.NonNegative:
-	sra a
-	ret
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 IsOccupiedBySolid:
 ; Takes: A as the Y coordinate
 ; Takes: L as the X corrdinate
@@ -483,19 +461,18 @@ IsOccupiedBySolid:
 	ld a, h
 	and a, %11100000
 	add a, l
-	;add a, ((MapData + 1024)&$ff)
+	;add a, MapData & 0xff
 	ld l, a
 
 	ld a, h
 	and a, %00000011
-	add a, ((MapData + 1024)>>8)
+	add a, CollisionMap>>8
 	ld h, a
 
 	; Always look at (x+0,y+0)
 	ld a, [hl]
 	and a, d
 	ret
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 CoordinateToMapOffset:

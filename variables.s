@@ -10,19 +10,16 @@ ButtonsReleased: db
 
 PlayerX: db
 PlayerY: db
-OldPlayerX: db
-OldPlayerY: db
 
 DeltaX: db
 DeltaY: db
 
 PlayerJumpInputBuffering: db
-PlayerBuildingUpJumpForce: db
 
-PlayerTileX: db
-PlayerTileY: db
-
-PlayerNumFramesInAir: db
+DebugStack:
+REPT 64
+    db
+ENDR
 
 SECTION "OAM Work Memory",WRAM0,ALIGN[8]
 Sprites:
