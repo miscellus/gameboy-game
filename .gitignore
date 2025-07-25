@@ -9,3 +9,4 @@ Backups/
 *.sym
 
 build_files/
+tools/bgb/bgb.ini
