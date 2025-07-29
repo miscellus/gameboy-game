@@ -1,6 +1,7 @@
-DEF ASSERTIONS = 0
+DEF DEBUG EQU 1
 
 INCLUDE "macros.s"
+INCLUDE "debug_macros.s"
 INCLUDE "hardware.s"
 INCLUDE "header.s"
 INCLUDE "tiles.s"
@@ -19,6 +20,13 @@ ProgramStart:
 	xor a
 	ldh [rLcdControl],a 	 ;LCD off
 	ldh [rLcdControlStatus],a
+
+    ; Enable sound
+    ld a, %10001111 ; Enable all 4 channels
+    ld [rNR52], a
+
+    ld a, %10000000
+    ld [rNR14], a ; Enable channel 1
 
 	ld  a,%11100100  ;shade palette (11 10 01 00)
 	ldh [rBackgroundPalette],a 	 ;setup palettes
@@ -78,6 +86,7 @@ GameLoop:
     call UpdateInput
     call UpdatePlayer
     call UpdateViewPort
+
 	jr GameLoop
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -123,22 +132,61 @@ IsOccupiedBySolid:
 ; Returns: If occupied in the zero flag (ZF=1 means occupied)
 ; Clobbers: A, D, H, L, F
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;     |        |        |                                                       
+;    -+--------+--------+-                                                      
+;     | (0, 0) | (1, 0) |   What each bit in a byte of the collision map means: 
+;     |   A    |   B    |   The coordinates are offsets from the parameters X,Y 
+;     |  Tile  |  Tile  |                                                       
+;     |        |        |                   76543210                            
+;    -+--------+--------+-           (2,2) -'||||||`- A = (0,0)                 
+;     | (0, 1) | (1, 1) |      (0,2)|(1,2) --'||||`-- B = (1,0)                 
+;     |   C    |   D    |      (2,0)|(2,1) ---'||`--- C = (0,1)                 
+;     |  Tile  |  Tile  |          A|B|C|D ----'`---- D = (1,1)                 
+;     |        |        |                                                       
+;    -+--------+--------+-  A 1 bit means Solid, 0 means Air                    
+;     |        |        |                                                       
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+;   This implementation assumes a map width of 32
+;
+    DEF SOLID_00 EQU (1<<0)
+    DEF SOLID_10 EQU (1<<1)
+    DEF SOLID_01 EQU (1<<2)
+    DEF SOLID_11 EQU (1<<3)
+    DEF SOLID_00_10_01_11 EQU (1<<4)
+    DEF SOLID_20_21 EQU (1<<5)
+    DEF SOLID_02_12 EQU (1<<6)
+    DEF SOLID_22 EQU (1<<7)
+
+    ;;;;;;;;;;
+    ; Y AXIS ;
+    ;;;;;;;;;;
+
 	rlca
 	rlca
 	ld h, a
 	and a, %00011100; These are the offset bits for Y
-	ld a, %1111;0000
-	;ld a, %11111111
+
+    ; Figure out what solid flags to include based on the coordinate offset
+    ; 
+    ; By default, include solid flags for (0, 0), (1, 0), (0, 1), and (1, 1)
+    ;
+    ; Howver, if aligned on Y, don't include (0,1) and (1, 1)
+    ; If aligned on X, don't include (1, 0) and (1, 1)
+    ; So, if aligned on both X and Y, only include solid flag (0, 0)
+	ld a, %1111
 	jr nz, .HasYOffset
-	and a, %0011;0000
+	and a, %0011
 .HasYOffset:
-	ld d, a
+	ld d, a ; Save solid flags for Y in d
+
 	ld a, l
 	and a, %00000111; These are the offset bits for X
 	ld a, d
 	jr nz, .HasXOffset
-	and a, %0101;0000
+	and a, %0101
 .HasXOffset:
+
 	ld d, a
 	ld a, l
 	rrca
@@ -150,7 +198,6 @@ IsOccupiedBySolid:
 	ld a, h
 	and a, %11100000
 	add a, l
-	;add a, MapData & 0xff
 	ld l, a
 
 	ld a, h
@@ -282,6 +329,8 @@ UpdatePlayer:
 	add a, e
 	ld [hl], a
 
+    ;ld [DebugRam], a
+    ;DebugPrintF "Diminished DeltaX: %hd"
 
     ; Get integer part of DeltaX (5.3 fixed point)
 	sra a
@@ -329,7 +378,7 @@ UpdatePlayer:
 .SkipJumpInputBufferRenew:
 	srl a
 	ld [PlayerJumpInputBuffering], a
-	jr nc, .NoJump
+	jp nc, .NoJump
 	;dprint "Slack %A%"
 
 	; Check if on ground
@@ -337,7 +386,7 @@ UpdatePlayer:
 	ld c, a ; save y
 	and a, %111
 	ld a, 0
-	jr nz, .NoJump ; Must be aligned with grid on Y to jump
+	jp nz, .NoJump ; Must be aligned with grid on Y to jump
 	ld a, b ; restore X position
 	ld l, a
 	ld a, c ; restore y
@@ -347,18 +396,62 @@ UpdatePlayer:
 	ld a, [hl]
 	and a, %1100;0000
 	ld c, a
-	jr z, .NoJump
+	jp z, .NoJump
 	ld a, b
 	and a, %111
 	ld a, c
 	jr nz, .NoXoffset
 	and %0100;0000
-	jr z, .NoJump
+	jp z, .NoJump
 .NoXoffset:
 	xor a
 	ld [PlayerJumpInputBuffering], a
 	ld a, -JumpForce
 	ld [DeltaY], a
+
+    ;
+    ; Play jump sound
+    ;
+    
+    ; [rNR10]: 80
+    ; [rNR11]: bf
+    ; [rNR12]: f3
+    ; [rNR13]: ff
+    ; [rNR14]: bf
+
+    push af
+    ld a, %00110001
+    ld [rNR10], a
+
+    ld a, %10000110
+    ld [rNR11], a ; 
+
+    ld a, %11110101
+    ld [rNR12], a ; 
+
+    ld a, %11111111
+    ld [rNR13], a ; 
+
+    ld a, %11000001
+    ld [rNR14], a ; Enable channel 1
+    
+    ld a, [rNR10]
+    DebugPrintRegA "[rNR10]: %hx"
+
+    ld a, [rNR11]
+    DebugPrintRegA "[rNR11]: %hx"
+
+    ld a, [rNR12]
+    DebugPrintRegA "[rNR12]: %hx"
+
+    ld a, [rNR13]
+    DebugPrintRegA "[rNR13]: %hx"
+
+    ld a, [rNR14]
+    DebugPrintRegA "[rNR14]: %hx"
+
+    pop af
+
 .NoJump:
 
 	;ButtonHandle ButtonDown, add a\, Speed
