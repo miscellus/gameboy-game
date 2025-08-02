@@ -7,6 +7,11 @@ Backups/
 *.sn1
 *.SYM
 *.sym
+*.exe
 
-build_files/
+build/
 tools/bgb/bgb.ini
+tools/bgb/bgbrecovery.sna
+*.pdb
+*.o
+*.old
