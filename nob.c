@@ -34,20 +34,34 @@ bool build_world_edit(void)
     return true;
 }
 
+bool build_game_boy_game(void)
+{
+    cmd_append(&cmd, PATH_RGBDS "rgbasm.exe", "-o", PATH_BUILD "main.obj", "main.s");
+    if (!cmd_run_sync_and_reset(&cmd)) return false;
+
+    cmd_append(&cmd, PATH_RGBDS "rgblink.exe", "-m", PATH_BUILD "main.map", "-n", PATH_BUILD "main.sym", "-o", PATH_BUILD "main.gb", PATH_BUILD "main.obj");
+    if (!cmd_run_sync_and_reset(&cmd)) return false;
+
+    cmd_append(&cmd, PATH_RGBDS "rgbfix.exe", "-p", "0", "-v", PATH_BUILD "main.gb");
+    if (!cmd_run_sync_and_reset(&cmd)) return false;
+
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF(argc, argv);
 
     if (!mkdir_if_not_exists(PATH_BUILD)) return 1;
 
-    cmd_append(&cmd, PATH_RGBDS "rgbasm.exe", "-o", PATH_BUILD "main.obj", "main.s");
-    if (!cmd_run_sync_and_reset(&cmd)) return 1;
+#if 0
+    log(INFO, "Building Game Boy Game\n");
+    if (!build_game_boy_game()) return 1;
+#endif
 
-    cmd_append(&cmd, PATH_RGBDS "rgblink.exe", "-m", PATH_BUILD "main.map", "-n", PATH_BUILD "main.sym", "-o", PATH_BUILD "main.gb", PATH_BUILD "main.obj");
-    if (!cmd_run_sync_and_reset(&cmd)) return 1;
+    log(INFO, "Building World Edit\n");
+    if (!build_world_edit()) return 1;
 
-    cmd_append(&cmd, PATH_RGBDS "rgbfix.exe", "-p", "0", "-v", PATH_BUILD "main.gb");
-    if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
     bool run = false;
     bool gb = false;
@@ -87,9 +101,6 @@ int main(int argc, char **argv)
             if (!cmd_run_sync_and_reset(&cmd)) return 1;
         }
     }
-
-    log(INFO, "Building World Edit\n");
-    if (!build_world_edit()) return 1;
 
     printf("Build successfully");
     return 0;
