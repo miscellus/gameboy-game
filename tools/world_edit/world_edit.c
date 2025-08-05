@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <raylib.h>
 #include <raymath.h>
@@ -11,16 +12,35 @@
 #define ZOOM_SHOW_PIXELS 10.0f
 #define ZOOM_SHOW_TILES 1.0f
 
-#define COLOR_GB_OFF ((Color){194, 207, 168, 255})
-#define COLOR_GB_LIGHT ((Color){173, 191, 146, 255})
-#define COLOR_GB_MID_LIGHT ((Color){150, 166, 124, 255})
-#define COLOR_GB_MID_DARK ((Color){114, 126, 100, 255})
-#define COLOR_GB_DARK ((Color){90, 99, 92, 255})
+typedef enum Palette_Index
+{
+    COLOR_GB_DARK = 0,
+    COLOR_GB_MID_DARK = 1,
+    COLOR_GB_MID_LIGHT = 2,
+    COLOR_GB_LIGHT = 3,
+    COLOR_GB_OFF = 4,
+} Palette_Index;
+
+static Color palette_gbp[] =
+{
+    [COLOR_GB_DARK] = {90, 99, 92, 255},
+    [COLOR_GB_MID_DARK] = {114, 126, 100, 255},
+    [COLOR_GB_MID_LIGHT] = {150, 166, 124, 255},
+    [COLOR_GB_LIGHT] = {173, 191, 146, 255},
+    [COLOR_GB_OFF] = {194, 207, 168, 255},
+};
+
+
+typedef struct TileGfx
+{
+    Color pixels[8*8];
+    uint8_t indexes[8*8]; // NOTE(jkk): In range 0-3
+    Texture2D texture;
+} TileGfx;
 
 typedef struct Tile
 {
-    Texture2D *texture;
-    uint8_t color_indexes[8*8]; // NOTE(jkk): In range 0-3
+    TileGfx *gfx;
     bool solid;
 } Tile;
 
@@ -30,6 +50,12 @@ typedef struct Level
     size_t width;
     size_t height;
 } Level;
+
+typedef struct Editor
+{
+    Camera2D camera;
+    Vector2 pointer_prev;
+} Editor;
 
 static Vector2 dpi;
 
@@ -46,13 +72,18 @@ void CameraSetZoomTarget(Camera2D *camera, Vector2 target)
 	camera->target = world_target;
 }
 
-void CameraUpdateZoom(Camera2D *camera, float zoom_input, Vector2 zoom_target, float zoom_min, float zoom_max)
+void ViewUpdate(Camera2D *camera, float zoom_input, Vector2 zoom_target, float zoom_min, float zoom_max, Vector2 delta_offset)
 {
-    if (zoom_input == 0) return;
+    if (zoom_input)
+    {
+        float zoom_factor = 0.1f * zoom_input;
+        CameraSetZoomTarget(camera, zoom_target);
+        CameraZoomByFactor(camera, zoom_factor, zoom_min, zoom_max);
+    }
 
-    float zoom_factor = 0.1f * zoom_input;
-    CameraSetZoomTarget(camera, zoom_target);
-    CameraZoomByFactor(camera, zoom_factor, zoom_min, zoom_max);
+    if (delta_offset.x != 0 && delta_offset.y != 0) {
+        camera->offset = Vector2Add(camera->offset, delta_offset);
+    }
 }
 
 int main(int argc, char **argv)
@@ -72,93 +103,106 @@ int main(int argc, char **argv)
     level.height = 64;
     level.tiles = calloc(level.width * level.height, sizeof(*level.tiles));
 
-    Color gb_colors_0[] =
-    {
-        COLOR_GB_OFF,
-        COLOR_GB_LIGHT,
-        COLOR_GB_MID_LIGHT,
-        COLOR_GB_MID_DARK,
-        COLOR_GB_DARK,
-    };
+    TileGfx test_gfx = {0};
+    test_gfx.texture = LoadTextureFromImage((Image){
+        .data = (void *)&test_gfx.pixels,
+        .width = 8,
+        .height = 8,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+    });
 
-    Image test_image = GenImageColor(8, 8, gb_colors_0[1]);
-    Texture2D test_texture = LoadTextureFromImage(test_image);
+    for (int i = 0; i < 8*8; ++i) test_gfx.pixels[i] = palette_gbp[COLOR_GB_LIGHT];
 
     for (size_t y = 0; y < level.height; ++y)
     {
         for (size_t x = 0; x < level.width; ++x)
         {
-            level.tiles[y * level.width + x].texture = &test_texture;
+            level.tiles[y * level.width + x].gfx = &test_gfx;
         }
     }
 
-    Camera2D camera = {0};
-    camera.offset = (Vector2){0, 0};
-    camera.target = (Vector2){0, 0};
-    camera.rotation = 0;
-    camera.zoom = 5.0f;
+    Editor editor = {0};
+    editor.camera.offset = (Vector2){0, 0};
+    editor.camera.target = (Vector2){0, 0};
+    editor.camera.rotation = 0;
+    editor.camera.zoom = 5.0f;
 
     while (!WindowShouldClose())
     {
         Vector2 mouse_pos_screen = GetMousePosition();
-        Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, camera);
+        Vector2 mouse_delta = Vector2Subtract(mouse_pos_screen, editor.pointer_prev);
+        editor.pointer_prev = mouse_pos_screen;
+        Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, editor.camera);
         float mouse_scroll = GetMouseWheelMoveV().y;
 
-        CameraUpdateZoom(&camera, mouse_scroll, mouse_pos_screen, ZOOM_MIN, ZOOM_MAX);
+        if (!IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && !IsKeyDown(KEY_SPACE))
+        {
+            mouse_delta = (Vector2){0};
+        }
+        ViewUpdate(&editor.camera, mouse_scroll, mouse_pos_screen, ZOOM_MIN, ZOOM_MAX, mouse_delta);
+
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+        {
+            // GetTileAtPoint
+            {
+                float tile_x = mouse_pos_world.x / 8.0f;
+                float tile_y = mouse_pos_world.y / 8.0f;
+                int tile_ix = (int)tile_x;
+                int tile_iy = (int)tile_y;
+
+                int px_x = (int)(8 * (tile_x - tile_ix));
+                int px_y = (int)(8 * (tile_y - tile_iy));
+
+                Tile *tile = NULL;
+                if (tile_ix >= 0 && tile_ix < level.width &&
+                    tile_iy >= 0 && tile_iy < level.height)
+                {
+                    tile = &level.tiles[tile_iy * level.width + tile_ix];
+
+                    assert(px_x >= 0 && px_x < 8 && px_y >= 0 && px_y < 8);
+                    uint8_t color_index = COLOR_GB_DARK;
+                    tile->gfx->pixels[px_y * 8 + px_x] = palette_gbp[color_index];
+                    tile->gfx->indexes[px_y * 8 + px_x] = color_index;
+
+                    UpdateTexture(tile->gfx->texture, (void *)&tile->gfx->pixels);
+                }
+            }
+        }
+
 
         BeginDrawing();
-        BeginMode2D(camera);
+        BeginMode2D(editor.camera);
         ClearBackground(WE_COLOR_GRAY_LIGHT);
         for (int y = 0; y < level.height; ++y)
         {
             for (int x = 0; x < level.width; ++x)
             {
-                Texture2D texture = *level.tiles[y * level.width + x].texture;
+                Texture2D texture = level.tiles[y * level.width + x].gfx->texture;
                 DrawTexture(texture, x*8, y*8, WHITE);
             }
         }
-
-        // if (camera.zoom > ZOOM_SHOW_LINES_THRESHOLD)
-        // {
-        //     Vector2 world_view_min = (Vector2){0, 0};
-        //     Vector2 world_view_max = (Vector2){level.width * 8.0f, level.height * 8.0f};
-        //     Color line_color = (Color){0, 0, 0, 48};
-        //
-        //     for (float y = world_view_min.y; y < world_view_max.y; y += 1.0f)
-        //     {
-        //         Vector2 start_pos = {world_view_min.x, y};
-        //         Vector2 end_pos = {world_view_max.x, y};
-        //         DrawLineEx(start_pos, end_pos, 0.1f, line_color);
-        //     }
-        //
-        //     for (float x = world_view_min.x; x < world_view_max.x; x += 1.0f)
-        //     {
-        //         Vector2 start_pos = {x, world_view_min.y};
-        //         Vector2 end_pos = {x, world_view_max.y};
-        //         DrawLineEx(start_pos, end_pos, 0.1f, line_color);
-        //     }
-        // }
 
         Vector2 pixel_rect_min = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
         DrawRectangleV(pixel_rect_min, (Vector2){1, 1}, (Color){255, 255, 0, 192});
 
         EndMode2D();
 
-        if (camera.zoom > ZOOM_SHOW_TILES)
+        if (editor.camera.zoom > ZOOM_SHOW_TILES)
         {
-            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, camera);
-            Vector2 grid_end = GetWorldToScreen2D((Vector2){level.width * 8.0f, level.height * 8.0f}, camera);
+            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, editor.camera);
+            Vector2 grid_end = GetWorldToScreen2D((Vector2){level.width * 8.0f, level.height * 8.0f}, editor.camera);
 
             Color line_color = (Color){0, 0, 0, 48};
 
             // for (float y = grid_start.y; y < grid_end.y; y += screen_pixels_per_world_pixel)
             for (int y = 0; y < level.height * 8; ++y)
             {
-                float yf = grid_start.y + y * camera.zoom;
+                float yf = grid_start.y + y * editor.camera.zoom;
                 Vector2 start_pos = {grid_start.x, yf};
                 Vector2 end_pos = {grid_end.x, yf};
                 bool on_tile_boundary = (y & 0x7) == 0;
-                if (on_tile_boundary || (y & 7) && camera.zoom > ZOOM_SHOW_PIXELS) {
+                if (on_tile_boundary || (y & 7) && editor.camera.zoom > ZOOM_SHOW_PIXELS) {
                     float line_width = on_tile_boundary ? 3.0f : 1.0f;
                     DrawLineEx(start_pos, end_pos, line_width, line_color);
                 }
@@ -166,16 +210,19 @@ int main(int argc, char **argv)
 
             for (int x = 0; x < level.width * 8; ++x)
             {
-                float xf = grid_start.x + x * camera.zoom;
+                float xf = grid_start.x + x * editor.camera.zoom;
                 Vector2 start_pos = {xf, grid_start.y};
                 Vector2 end_pos = {xf, grid_end.y};
                 bool on_tile_boundary = (x & 0x7) == 0;
-                if (on_tile_boundary || (x & 7) && camera.zoom > ZOOM_SHOW_PIXELS) {
+                if (on_tile_boundary || (x & 7) && editor.camera.zoom > ZOOM_SHOW_PIXELS) {
                     float line_width = on_tile_boundary ? 3.0f : 1.0f;
                     DrawLineEx(start_pos, end_pos, line_width, line_color);
                 }
             }
-        }        EndDrawing();
+        }
+        DrawText(TextFormat("mouse diff: (%04.2f, %04.2f)", mouse_delta.x, mouse_delta.y), 10, 10, 24, BLACK);
+        EndDrawing();
+
     }
     return 0;
 }
