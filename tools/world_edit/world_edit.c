@@ -51,10 +51,19 @@ typedef struct Level
     size_t height;
 } Level;
 
+typedef enum Editor_Mode
+{
+    EDITOR_MODE_DRAW_TILES,
+    EDITOR_MODE_DRAW_PIXELS,
+} Editor_Mode;
+
 typedef struct Editor
 {
     Camera2D camera;
     Vector2 pointer_prev;
+    uint8_t color_index; // NOTE(jkk): In range 0-3
+    Editor_Mode mode;
+    bool hide_grid;
 } Editor;
 
 static Vector2 dpi;
@@ -104,6 +113,8 @@ int main(int argc, char **argv)
     level.tiles = calloc(level.width * level.height, sizeof(*level.tiles));
 
     TileGfx test_gfx = {0};
+    for (int i = 0; i < 8*8; ++i) test_gfx.pixels[i] = palette_gbp[COLOR_GB_LIGHT];
+
     test_gfx.texture = LoadTextureFromImage((Image){
         .data = (void *)&test_gfx.pixels,
         .width = 8,
@@ -111,8 +122,7 @@ int main(int argc, char **argv)
         .mipmaps = 1,
         .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
     });
-
-    for (int i = 0; i < 8*8; ++i) test_gfx.pixels[i] = palette_gbp[COLOR_GB_LIGHT];
+    UpdateTexture(test_gfx.texture, (void *)&test_gfx.pixels);
 
     for (size_t y = 0; y < level.height; ++y)
     {
@@ -127,6 +137,7 @@ int main(int argc, char **argv)
     editor.camera.target = (Vector2){0, 0};
     editor.camera.rotation = 0;
     editor.camera.zoom = 5.0f;
+    editor.mode = EDITOR_MODE_DRAW_PIXELS;
 
     while (!WindowShouldClose())
     {
@@ -135,6 +146,14 @@ int main(int argc, char **argv)
         editor.pointer_prev = mouse_pos_screen;
         Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, editor.camera);
         float mouse_scroll = GetMouseWheelMoveV().y;
+
+        if (IsKeyPressed(KEY_G))  editor.hide_grid = !editor.hide_grid;
+
+
+        if (IsKeyPressed(KEY_ONE)) editor.color_index = COLOR_GB_DARK;
+        if (IsKeyPressed(KEY_TWO)) editor.color_index = COLOR_GB_MID_DARK;
+        if (IsKeyPressed(KEY_THREE)) editor.color_index = COLOR_GB_MID_LIGHT;
+        if (IsKeyPressed(KEY_FOUR)) editor.color_index = COLOR_GB_LIGHT;
 
         if (!IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && !IsKeyDown(KEY_SPACE))
         {
@@ -161,7 +180,7 @@ int main(int argc, char **argv)
                     tile = &level.tiles[tile_iy * level.width + tile_ix];
 
                     assert(px_x >= 0 && px_x < 8 && px_y >= 0 && px_y < 8);
-                    uint8_t color_index = COLOR_GB_DARK;
+                    uint8_t color_index = editor.color_index;
                     tile->gfx->pixels[px_y * 8 + px_x] = palette_gbp[color_index];
                     tile->gfx->indexes[px_y * 8 + px_x] = color_index;
 
@@ -173,7 +192,7 @@ int main(int argc, char **argv)
 
         BeginDrawing();
         BeginMode2D(editor.camera);
-        ClearBackground(WE_COLOR_GRAY_LIGHT);
+        ClearBackground(palette_gbp[COLOR_GB_OFF]);
         for (int y = 0; y < level.height; ++y)
         {
             for (int x = 0; x < level.width; ++x)
@@ -183,12 +202,31 @@ int main(int argc, char **argv)
             }
         }
 
-        Vector2 pixel_rect_min = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
-        DrawRectangleV(pixel_rect_min, (Vector2){1, 1}, (Color){255, 255, 0, 192});
 
         EndMode2D();
+        /////////////////////////////
+        //                         //
+        // END OF CAMERA DRAW MODE //
+        //                         //
+        /////////////////////////////
 
-        if (editor.camera.zoom > ZOOM_SHOW_TILES)
+        if (editor.mode == EDITOR_MODE_DRAW_PIXELS && editor.camera.zoom > ZOOM_SHOW_PIXELS)
+        {
+            Vector2 pixel_rect_min_world = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
+            Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, editor.camera);
+
+            Color draw_color = palette_gbp[editor.color_index];
+            Rectangle pixel_rect = {
+                .x = pixel_rect_min.x,
+                .y = pixel_rect_min.y,
+                .width = editor.camera.zoom,
+                .height = editor.camera.zoom,
+            };
+            DrawRectangleRec(pixel_rect, draw_color);
+            DrawRectangleLinesEx(pixel_rect, 3, BLACK);
+        }
+
+        if (editor.hide_grid && editor.camera.zoom > ZOOM_SHOW_TILES)
         {
             Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, editor.camera);
             Vector2 grid_end = GetWorldToScreen2D((Vector2){level.width * 8.0f, level.height * 8.0f}, editor.camera);
