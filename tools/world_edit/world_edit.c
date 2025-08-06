@@ -14,7 +14,8 @@
 #define ZOOM_MIN 1.0f
 #define ZOOM_MAX 60.0f
 #define ZOOM_SHOW_PIXELS 10.0f
-#define ZOOM_SHOW_TILES 1.0f
+#define ZOOM_SHOW_TILES 2.5f
+#define ZOOM_SHOW_TILE_INDEXES ZOOM_SHOW_TILES
 
 typedef enum Palette_Index
 {
@@ -86,6 +87,7 @@ typedef struct Editor
     uint8_t color_index; // NOTE(jkk): In range 0-3
     Editor_Mode mode;
     bool hide_grid;
+    bool show_tile_indexes;
     Level level;
     TileSet tile_set;
 } Editor;
@@ -179,7 +181,7 @@ int main(int argc, char **argv)
         float mouse_scroll = GetMouseWheelMoveV().y;
 
         if (IsKeyPressed(KEY_G))  editor->hide_grid = !editor->hide_grid;
-
+        if (IsKeyPressed(KEY_I))  editor->show_tile_indexes = !editor->show_tile_indexes;
 
         if (IsKeyPressed(KEY_ONE)) editor->color_index = COLOR_GB_DARK;
         if (IsKeyPressed(KEY_TWO)) editor->color_index = COLOR_GB_MID_DARK;
@@ -259,7 +261,7 @@ int main(int argc, char **argv)
             DrawRectangleLinesEx(pixel_rect, 3, BLACK);
         }
 
-        if (editor->hide_grid && editor->camera.zoom > ZOOM_SHOW_TILES)
+        if (!editor->hide_grid && editor->camera.zoom > ZOOM_SHOW_TILES)
         {
             Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, editor->camera);
             Vector2 grid_end = GetWorldToScreen2D((Vector2){editor->level.width * 8.0f, editor->level.height * 8.0f}, editor->camera);
@@ -291,6 +293,27 @@ int main(int argc, char **argv)
                 }
             }
         }
+
+        if (editor->show_tile_indexes && editor->camera.zoom > ZOOM_SHOW_TILE_INDEXES)
+        {
+            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, editor->camera);
+
+            Font font = GetFontDefault();
+            for (int y = 0; y < editor->level.height; ++y)
+            {
+                float yf = grid_start.y + y * 8.0f * editor->camera.zoom;
+
+                for (int x = 0; x < editor->level.width; ++x)
+                {
+                    float xf = grid_start.x + x * 8.0f * editor->camera.zoom;
+                    int tile_index = editor->level.tiles[y * editor->level.width + x].index;
+                    Vector2 pos = { xf + editor->camera.zoom * 0.5f, yf + editor->camera.zoom * 0.5f};
+                    DrawTextEx(font, TextFormat("%d", tile_index), pos, 24, 1.0f, BLACK);
+                }
+            }
+        }
+
+
         DrawText(TextFormat("mouse diff: (%04.2f, %04.2f)", mouse_delta.x, mouse_delta.y), 10, 10, 24, BLACK);
         EndDrawing();
 
