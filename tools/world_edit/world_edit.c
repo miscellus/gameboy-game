@@ -261,6 +261,9 @@ int main(int argc, char **argv)
             DrawRectangleLinesEx(pixel_rect, 3, BLACK);
         }
 
+        /////////////////
+        // Draw Tile Grid
+
         if (!editor->hide_grid && editor->camera.zoom > ZOOM_SHOW_TILES)
         {
             Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, editor->camera);
@@ -294,6 +297,9 @@ int main(int argc, char **argv)
             }
         }
 
+        ////////////////////
+        // Draw Tile Indexes
+
         if (editor->show_tile_indexes && editor->camera.zoom > ZOOM_SHOW_TILE_INDEXES)
         {
             Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, editor->camera);
@@ -312,9 +318,21 @@ int main(int argc, char **argv)
                 }
             }
         }
+        
+        ////////////////
+        // Draw Tile Set
+        {
+            for (int i = 0; i < editor->tile_set.count; ++i)
+            {
+                Texture texture = editor->tile_set.items[i].texture;
 
+                Vector2 pos = {(float)(i % 16), (float)(i - (i % 16))};
+                pos = Vector2Add(Vector2Scale(pos, 8.0f), (Vector2){64.0f, 64.0f});
 
-        DrawText(TextFormat("mouse diff: (%04.2f, %04.2f)", mouse_delta.x, mouse_delta.y), 10, 10, 24, BLACK);
+                DrawTextureV(texture, pos, WHITE);
+            }
+        }
+
         EndDrawing();
 
     }
