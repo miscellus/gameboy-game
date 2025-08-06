@@ -6,6 +6,10 @@
 #include <string.h>
 #include <stdint.h>
 
+#define NOB_IMPLEMENTATION
+#define NOB_STRIP_PREFIX
+#include "../../nob.h"
+
 #define WE_COLOR_GRAY_LIGHT ((Color){192, 192, 192, 255})
 #define ZOOM_MIN 1.0f
 #define ZOOM_MAX 60.0f
@@ -30,6 +34,16 @@ static Color palette_gbp[] =
     [COLOR_GB_OFF] = {194, 207, 168, 255},
 };
 
+typedef union TileGbFormat
+{
+    // Tiles in the game boy are stored line by line, using 2 bytes per line.
+    // For each line, the first byte specifies the least significant bit of the
+    // color ID of each pixel, and the second byte specifies the most
+    // significant bit. In both bytes, bit 7 represents the leftmost pixel, and
+    // bit 0 the rightmost.
+    uint8_t u8[16];
+    uint64_t u64[2];
+} TileGbFormat;
 
 typedef struct TileGfx
 {
@@ -38,9 +52,17 @@ typedef struct TileGfx
     Texture2D texture;
 } TileGfx;
 
+typedef struct TileSet
+{
+    // Dynamic array of tiles
+    TileGfx *items;
+    size_t count;
+    size_t capacity;
+} TileSet;
+
 typedef struct Tile
 {
-    TileGfx *gfx;
+    uint32_t index;
     bool solid;
 } Tile;
 
@@ -64,6 +86,8 @@ typedef struct Editor
     uint8_t color_index; // NOTE(jkk): In range 0-3
     Editor_Mode mode;
     bool hide_grid;
+    Level level;
+    TileSet tile_set;
 } Editor;
 
 static Vector2 dpi;
@@ -95,71 +119,78 @@ void ViewUpdate(Camera2D *camera, float zoom_input, Vector2 zoom_target, float z
     }
 }
 
+static TileGfx create_tile_gfx(uint8_t color_index)
+{
+    assert(color_index < 4);
+
+    TileGfx gfx = {0};
+    for (int i = 0; i < 8*8; ++i)
+    {
+        gfx.pixels[i] = palette_gbp[color_index];
+        gfx.indexes[i] = color_index;
+    }
+
+    gfx.texture = LoadTextureFromImage((Image){
+        .data = (void *)&gfx.pixels,
+        .width = 8,
+        .height = 8,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+    });
+    UpdateTexture(gfx.texture, (void *)&gfx.pixels);
+
+    return gfx;
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
     printf("Hello, World!\n");
 
-    InitWindow(800, 600, "Hello, Raylib!");
+    InitWindow(960, 576, "Hello, Raylib!");
     SetWindowState(FLAG_WINDOW_RESIZABLE);
     SetTargetFPS(60);
 
     dpi = GetWindowScaleDPI();
 
-    Level level = {0};
-    level.width = 128;
-    level.height = 64;
-    level.tiles = calloc(level.width * level.height, sizeof(*level.tiles));
+    Editor *editor = calloc(1, sizeof(*editor));
+    editor->camera.offset = (Vector2){0, 0};
+    editor->camera.target = (Vector2){0, 0};
+    editor->camera.rotation = 0;
+    editor->camera.zoom = 5.0f;
+    editor->mode = EDITOR_MODE_DRAW_PIXELS;
 
-    TileGfx test_gfx = {0};
-    for (int i = 0; i < 8*8; ++i) test_gfx.pixels[i] = palette_gbp[COLOR_GB_LIGHT];
+    editor->level.width = 128;
+    editor->level.height = 64;
+    editor->level.tiles = calloc(editor->level.width * editor->level.height, sizeof(*editor->level.tiles));
 
-    test_gfx.texture = LoadTextureFromImage((Image){
-        .data = (void *)&test_gfx.pixels,
-        .width = 8,
-        .height = 8,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    });
-    UpdateTexture(test_gfx.texture, (void *)&test_gfx.pixels);
+    // Create initial tile 0
 
-    for (size_t y = 0; y < level.height; ++y)
-    {
-        for (size_t x = 0; x < level.width; ++x)
-        {
-            level.tiles[y * level.width + x].gfx = &test_gfx;
-        }
-    }
-
-    Editor editor = {0};
-    editor.camera.offset = (Vector2){0, 0};
-    editor.camera.target = (Vector2){0, 0};
-    editor.camera.rotation = 0;
-    editor.camera.zoom = 5.0f;
-    editor.mode = EDITOR_MODE_DRAW_PIXELS;
+    TileGfx tile0 = create_tile_gfx(COLOR_GB_LIGHT);
+    da_append(&editor->tile_set, tile0);
 
     while (!WindowShouldClose())
     {
         Vector2 mouse_pos_screen = GetMousePosition();
-        Vector2 mouse_delta = Vector2Subtract(mouse_pos_screen, editor.pointer_prev);
-        editor.pointer_prev = mouse_pos_screen;
-        Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, editor.camera);
+        Vector2 mouse_delta = Vector2Subtract(mouse_pos_screen, editor->pointer_prev);
+        editor->pointer_prev = mouse_pos_screen;
+        Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, editor->camera);
         float mouse_scroll = GetMouseWheelMoveV().y;
 
-        if (IsKeyPressed(KEY_G))  editor.hide_grid = !editor.hide_grid;
+        if (IsKeyPressed(KEY_G))  editor->hide_grid = !editor->hide_grid;
 
 
-        if (IsKeyPressed(KEY_ONE)) editor.color_index = COLOR_GB_DARK;
-        if (IsKeyPressed(KEY_TWO)) editor.color_index = COLOR_GB_MID_DARK;
-        if (IsKeyPressed(KEY_THREE)) editor.color_index = COLOR_GB_MID_LIGHT;
-        if (IsKeyPressed(KEY_FOUR)) editor.color_index = COLOR_GB_LIGHT;
+        if (IsKeyPressed(KEY_ONE)) editor->color_index = COLOR_GB_DARK;
+        if (IsKeyPressed(KEY_TWO)) editor->color_index = COLOR_GB_MID_DARK;
+        if (IsKeyPressed(KEY_THREE)) editor->color_index = COLOR_GB_MID_LIGHT;
+        if (IsKeyPressed(KEY_FOUR)) editor->color_index = COLOR_GB_LIGHT;
 
         if (!IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && !IsKeyDown(KEY_SPACE))
         {
             mouse_delta = (Vector2){0};
         }
-        ViewUpdate(&editor.camera, mouse_scroll, mouse_pos_screen, ZOOM_MIN, ZOOM_MAX, mouse_delta);
+        ViewUpdate(&editor->camera, mouse_scroll, mouse_pos_screen, ZOOM_MIN, ZOOM_MAX, mouse_delta);
 
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
@@ -174,30 +205,32 @@ int main(int argc, char **argv)
                 int px_y = (int)(8 * (tile_y - tile_iy));
 
                 Tile *tile = NULL;
-                if (tile_ix >= 0 && tile_ix < level.width &&
-                    tile_iy >= 0 && tile_iy < level.height)
+                if (tile_ix >= 0 && tile_ix < editor->level.width &&
+                    tile_iy >= 0 && tile_iy < editor->level.height)
                 {
-                    tile = &level.tiles[tile_iy * level.width + tile_ix];
+                    tile = &editor->level.tiles[tile_iy * editor->level.width + tile_ix];
 
                     assert(px_x >= 0 && px_x < 8 && px_y >= 0 && px_y < 8);
-                    uint8_t color_index = editor.color_index;
-                    tile->gfx->pixels[px_y * 8 + px_x] = palette_gbp[color_index];
-                    tile->gfx->indexes[px_y * 8 + px_x] = color_index;
+                    uint8_t color_index = editor->color_index;
 
-                    UpdateTexture(tile->gfx->texture, (void *)&tile->gfx->pixels);
+                    TileGfx *gfx = &editor->tile_set.items[tile->index];
+                    gfx->pixels[px_y * 8 + px_x] = palette_gbp[color_index];
+                    gfx->indexes[px_y * 8 + px_x] = color_index;
+
+                    UpdateTexture(gfx->texture, (void *)&gfx->pixels);
                 }
             }
         }
 
 
         BeginDrawing();
-        BeginMode2D(editor.camera);
+        BeginMode2D(editor->camera);
         ClearBackground(palette_gbp[COLOR_GB_OFF]);
-        for (int y = 0; y < level.height; ++y)
+        for (int y = 0; y < editor->level.height; ++y)
         {
-            for (int x = 0; x < level.width; ++x)
+            for (int x = 0; x < editor->level.width; ++x)
             {
-                Texture2D texture = level.tiles[y * level.width + x].gfx->texture;
+                Texture2D texture = editor->tile_set.items[editor->level.tiles[y * editor->level.width + x].index].texture;
                 DrawTexture(texture, x*8, y*8, WHITE);
             }
         }
@@ -210,49 +243,49 @@ int main(int argc, char **argv)
         //                         //
         /////////////////////////////
 
-        if (editor.mode == EDITOR_MODE_DRAW_PIXELS && editor.camera.zoom > ZOOM_SHOW_PIXELS)
+        if (editor->mode == EDITOR_MODE_DRAW_PIXELS && editor->camera.zoom > ZOOM_SHOW_PIXELS)
         {
             Vector2 pixel_rect_min_world = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
-            Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, editor.camera);
+            Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, editor->camera);
 
-            Color draw_color = palette_gbp[editor.color_index];
+            Color draw_color = palette_gbp[editor->color_index];
             Rectangle pixel_rect = {
                 .x = pixel_rect_min.x,
                 .y = pixel_rect_min.y,
-                .width = editor.camera.zoom,
-                .height = editor.camera.zoom,
+                .width = editor->camera.zoom,
+                .height = editor->camera.zoom,
             };
             DrawRectangleRec(pixel_rect, draw_color);
             DrawRectangleLinesEx(pixel_rect, 3, BLACK);
         }
 
-        if (editor.hide_grid && editor.camera.zoom > ZOOM_SHOW_TILES)
+        if (editor->hide_grid && editor->camera.zoom > ZOOM_SHOW_TILES)
         {
-            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, editor.camera);
-            Vector2 grid_end = GetWorldToScreen2D((Vector2){level.width * 8.0f, level.height * 8.0f}, editor.camera);
+            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, editor->camera);
+            Vector2 grid_end = GetWorldToScreen2D((Vector2){editor->level.width * 8.0f, editor->level.height * 8.0f}, editor->camera);
 
             Color line_color = (Color){0, 0, 0, 48};
 
             // for (float y = grid_start.y; y < grid_end.y; y += screen_pixels_per_world_pixel)
-            for (int y = 0; y < level.height * 8; ++y)
+            for (int y = 0; y < editor->level.height * 8; ++y)
             {
-                float yf = grid_start.y + y * editor.camera.zoom;
+                float yf = grid_start.y + y * editor->camera.zoom;
                 Vector2 start_pos = {grid_start.x, yf};
                 Vector2 end_pos = {grid_end.x, yf};
                 bool on_tile_boundary = (y & 0x7) == 0;
-                if (on_tile_boundary || (y & 7) && editor.camera.zoom > ZOOM_SHOW_PIXELS) {
+                if (on_tile_boundary || (y & 7) && editor->camera.zoom > ZOOM_SHOW_PIXELS) {
                     float line_width = on_tile_boundary ? 3.0f : 1.0f;
                     DrawLineEx(start_pos, end_pos, line_width, line_color);
                 }
             }
 
-            for (int x = 0; x < level.width * 8; ++x)
+            for (int x = 0; x < editor->level.width * 8; ++x)
             {
-                float xf = grid_start.x + x * editor.camera.zoom;
+                float xf = grid_start.x + x * editor->camera.zoom;
                 Vector2 start_pos = {xf, grid_start.y};
                 Vector2 end_pos = {xf, grid_end.y};
                 bool on_tile_boundary = (x & 0x7) == 0;
-                if (on_tile_boundary || (x & 7) && editor.camera.zoom > ZOOM_SHOW_PIXELS) {
+                if (on_tile_boundary || (x & 7) && editor->camera.zoom > ZOOM_SHOW_PIXELS) {
                     float line_width = on_tile_boundary ? 3.0f : 1.0f;
                     DrawLineEx(start_pos, end_pos, line_width, line_color);
                 }
