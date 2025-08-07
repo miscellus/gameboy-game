@@ -35,8 +35,10 @@ static Color palette_gbp[] =
     [COLOR_GB_OFF] = {194, 207, 168, 255},
 };
 
-typedef union TileGbFormat
+typedef union GB_Tile_Data
 {
+    // NOTE(jkk): 128 bits
+    //
     // Tiles in the game boy are stored line by line, using 2 bytes per line.
     // For each line, the first byte specifies the least significant bit of the
     // color ID of each pixel, and the second byte specifies the most
@@ -44,32 +46,32 @@ typedef union TileGbFormat
     // bit 0 the rightmost.
     uint8_t u8[16];
     uint64_t u64[2];
-} TileGbFormat;
+} GB_Tile_Data;
 
-typedef struct TileGfx
+typedef struct Tile
 {
     Color pixels[8*8];
     uint8_t indexes[8*8]; // NOTE(jkk): In range 0-3
     Texture2D texture;
-} TileGfx;
+} Tile;
 
-typedef struct TileSet
+typedef struct Tiles
 {
     // Dynamic array of tiles
-    TileGfx *items;
+    Tile *items;
     size_t count;
     size_t capacity;
-} TileSet;
+} Tiles;
 
-typedef struct Tile
+typedef struct World_Tile
 {
     uint32_t index;
     bool solid;
-} Tile;
+} World_Tile;
 
 typedef struct Level
 {
-    Tile *tiles;
+    World_Tile *tiles;
     size_t width;
     size_t height;
 } Level;
@@ -89,10 +91,10 @@ typedef struct Editor
     bool hide_grid;
     bool show_tile_indexes;
     Level level;
-    TileSet tile_set;
+    Tiles tile_set;
 } Editor;
 
-static Vector2 dpi;
+static Vector2 DPI;
 
 void CameraZoomByFactor(Camera2D *camera, float zoom_factor, float zoom_min, float zoom_max)
 {
@@ -121,27 +123,27 @@ void ViewUpdate(Camera2D *camera, float zoom_input, Vector2 zoom_target, float z
     }
 }
 
-static TileGfx create_tile_gfx(uint8_t color_index)
+static Tile CreateTile(uint8_t color_index)
 {
     assert(color_index < 4);
 
-    TileGfx gfx = {0};
+    Tile tile = {0};
     for (int i = 0; i < 8*8; ++i)
     {
-        gfx.pixels[i] = palette_gbp[color_index];
-        gfx.indexes[i] = color_index;
+        tile.pixels[i] = palette_gbp[color_index];
+        tile.indexes[i] = color_index;
     }
 
-    gfx.texture = LoadTextureFromImage((Image){
-        .data = (void *)&gfx.pixels,
+    tile.texture = LoadTextureFromImage((Image){
+        .data = (void *)&tile.pixels,
         .width = 8,
         .height = 8,
         .mipmaps = 1,
         .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
     });
-    UpdateTexture(gfx.texture, (void *)&gfx.pixels);
+    UpdateTexture(tile.texture, (void *)&tile.pixels);
 
-    return gfx;
+    return tile;
 }
 
 int main(int argc, char **argv)
@@ -154,7 +156,7 @@ int main(int argc, char **argv)
     SetWindowState(FLAG_WINDOW_RESIZABLE);
     SetTargetFPS(60);
 
-    dpi = GetWindowScaleDPI();
+    DPI = GetWindowScaleDPI();
 
     Editor *editor = calloc(1, sizeof(*editor));
     editor->camera.offset = (Vector2){0, 0};
@@ -169,7 +171,7 @@ int main(int argc, char **argv)
 
     // Create initial tile 0
 
-    TileGfx tile0 = create_tile_gfx(COLOR_GB_LIGHT);
+    Tile tile0 = CreateTile(COLOR_GB_LIGHT);
     da_append(&editor->tile_set, tile0);
 
     while (!WindowShouldClose())
@@ -206,20 +208,20 @@ int main(int argc, char **argv)
                 int px_x = (int)(8 * (tile_x - tile_ix));
                 int px_y = (int)(8 * (tile_y - tile_iy));
 
-                Tile *tile = NULL;
+                World_Tile *world_tile = NULL;
                 if (tile_ix >= 0 && tile_ix < editor->level.width &&
                     tile_iy >= 0 && tile_iy < editor->level.height)
                 {
-                    tile = &editor->level.tiles[tile_iy * editor->level.width + tile_ix];
+                    world_tile = &editor->level.tiles[tile_iy * editor->level.width + tile_ix];
 
                     assert(px_x >= 0 && px_x < 8 && px_y >= 0 && px_y < 8);
                     uint8_t color_index = editor->color_index;
 
-                    TileGfx *gfx = &editor->tile_set.items[tile->index];
-                    gfx->pixels[px_y * 8 + px_x] = palette_gbp[color_index];
-                    gfx->indexes[px_y * 8 + px_x] = color_index;
+                    Tile *tile = &editor->tile_set.items[world_tile->index];
+                    tile->pixels[px_y * 8 + px_x] = palette_gbp[color_index];
+                    tile->indexes[px_y * 8 + px_x] = color_index;
 
-                    UpdateTexture(gfx->texture, (void *)&gfx->pixels);
+                    UpdateTexture(tile->texture, (void *)&tile->pixels);
                 }
             }
         }
@@ -271,7 +273,6 @@ int main(int argc, char **argv)
 
             Color line_color = (Color){0, 0, 0, 48};
 
-            // for (float y = grid_start.y; y < grid_end.y; y += screen_pixels_per_world_pixel)
             for (int y = 0; y < editor->level.height * 8; ++y)
             {
                 float yf = grid_start.y + y * editor->camera.zoom;
