@@ -89,7 +89,7 @@ typedef enum Editor_Mode
     EDITOR_MODE_DRAW_PIXELS,
 } Editor_Mode;
 
-typedef struct Editor
+typedef struct App
 {
     Camera2D camera;
     Vector2 pointer_prev;
@@ -99,9 +99,9 @@ typedef struct Editor
     bool show_tile_indexes;
     Level level;
     Tiles tile_set;
-} Editor;
+} App;
 
-static Vector2 DPI;
+App *APP;
 
 void CameraZoomByFactor(Camera2D *camera, float zoom_factor, float zoom_min, float zoom_max)
 {
@@ -168,9 +168,9 @@ World_Position GetWorldPosition(Vector2 point)
     return result;
 }
 
-World_Tile *GetWorldTile(Editor *editor, uint32_t tile_x, uint32_t tile_y)
+World_Tile *GetWorldTile(uint32_t tile_x, uint32_t tile_y)
 {
-    Level *level = &editor->level;
+    Level *level = &APP->level;
     World_Tile *world_tile = NULL;
     if (tile_x >= 0 && tile_x < level->width &&
         tile_y >= 0 && tile_y < level->height)
@@ -181,10 +181,10 @@ World_Tile *GetWorldTile(Editor *editor, uint32_t tile_x, uint32_t tile_y)
     return world_tile;
 }
 
-Tile *GetTile(Editor *editor, World_Tile *world_tile)
+Tile *GetTile(World_Tile *world_tile)
 {
-    assert(world_tile->index < editor->tile_set.count);
-    return &editor->tile_set.items[world_tile->index];
+    assert(world_tile->index < APP->tile_set.count);
+    return &APP->tile_set.items[world_tile->index];
 }
 
 void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_index)
@@ -194,6 +194,24 @@ void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_in
     tile->color_indexes[pixel_y * 8 + pixel_x] = color_index;
     Color pixel = palette_gbp[color_index];
     UpdateTextureRec(tile->texture, (Rectangle){(float)pixel_x, (float)pixel_y, 1.0f, 1.0f}, &pixel);
+}
+
+void InitApp(void)
+{
+    APP = calloc(1, sizeof(*APP));
+    APP->camera.offset = (Vector2){0, 0};
+    APP->camera.target = (Vector2){0, 0};
+    APP->camera.rotation = 0;
+    APP->camera.zoom = 5.0f;
+    APP->mode = EDITOR_MODE_DRAW_PIXELS;
+
+    APP->level.width = 128;
+    APP->level.height = 64;
+    APP->level.tiles = calloc(APP->level.width * APP->level.height, sizeof(*APP->level.tiles));
+
+    // Create initial tile 0
+    Tile tile0 = CreateTile(COLOR_GB_LIGHT);
+    da_append(&APP->tile_set, tile0);
 }
 
 int main(int argc, char **argv)
@@ -206,159 +224,141 @@ int main(int argc, char **argv)
     SetWindowState(FLAG_WINDOW_RESIZABLE);
     SetTargetFPS(60);
 
-    DPI = GetWindowScaleDPI();
-
-    Editor *editor = calloc(1, sizeof(*editor));
-    editor->camera.offset = (Vector2){0, 0};
-    editor->camera.target = (Vector2){0, 0};
-    editor->camera.rotation = 0;
-    editor->camera.zoom = 5.0f;
-    editor->mode = EDITOR_MODE_DRAW_PIXELS;
-
-    editor->level.width = 128;
-    editor->level.height = 64;
-    editor->level.tiles = calloc(editor->level.width * editor->level.height, sizeof(*editor->level.tiles));
-
-    // Create initial tile 0
-
-    Tile tile0 = CreateTile(COLOR_GB_LIGHT);
-    da_append(&editor->tile_set, tile0);
+    InitApp();
 
     while (!WindowShouldClose())
     {
         Vector2 mouse_pos_screen = GetMousePosition();
-        Vector2 mouse_delta = Vector2Subtract(mouse_pos_screen, editor->pointer_prev);
-        editor->pointer_prev = mouse_pos_screen;
-        Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, editor->camera);
+        Vector2 mouse_delta = Vector2Subtract(mouse_pos_screen, APP->pointer_prev);
+        APP->pointer_prev = mouse_pos_screen;
         float mouse_scroll = GetMouseWheelMoveV().y;
-
-        if (IsKeyPressed(KEY_G))  editor->hide_grid = !editor->hide_grid;
-        if (IsKeyPressed(KEY_I))  editor->show_tile_indexes = !editor->show_tile_indexes;
-
-        if (IsKeyPressed(KEY_ONE)) editor->color_index = COLOR_GB_DARK;
-        if (IsKeyPressed(KEY_TWO)) editor->color_index = COLOR_GB_MID_DARK;
-        if (IsKeyPressed(KEY_THREE)) editor->color_index = COLOR_GB_MID_LIGHT;
-        if (IsKeyPressed(KEY_FOUR)) editor->color_index = COLOR_GB_LIGHT;
 
         if (!IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && !IsKeyDown(KEY_SPACE))
         {
             mouse_delta = (Vector2){0};
         }
-        ViewUpdate(&editor->camera, mouse_scroll, mouse_pos_screen, ZOOM_MIN, ZOOM_MAX, mouse_delta);
+        ViewUpdate(&APP->camera, mouse_scroll, mouse_pos_screen, ZOOM_MIN, ZOOM_MAX, mouse_delta);
+
+        if (IsKeyPressed(KEY_G))  APP->hide_grid = !APP->hide_grid;
+        if (IsKeyPressed(KEY_I))  APP->show_tile_indexes = !APP->show_tile_indexes;
+
+        if (IsKeyPressed(KEY_ONE)) APP->color_index = COLOR_GB_DARK;
+        if (IsKeyPressed(KEY_TWO)) APP->color_index = COLOR_GB_MID_DARK;
+        if (IsKeyPressed(KEY_THREE)) APP->color_index = COLOR_GB_MID_LIGHT;
+        if (IsKeyPressed(KEY_FOUR)) APP->color_index = COLOR_GB_LIGHT;
+
+        Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, APP->camera);
 
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
             World_Position pos = GetWorldPosition(mouse_pos_world);
-            World_Tile *world_tile = GetWorldTile(editor, pos.tile_x, pos.tile_y);
-            Tile *tile = GetTile(editor, world_tile);
-            SetTilePixel(tile, pos.pixel_x, pos.pixel_y, editor->color_index);
+            World_Tile *world_tile = GetWorldTile(pos.tile_x, pos.tile_y);
+            Tile *tile = GetTile(world_tile);
+            SetTilePixel(tile, pos.pixel_x, pos.pixel_y, APP->color_index);
         }
+
+        ///////////////////////////
+        //                       //
+        //        DRAWING        //
+        //                       //
+        ///////////////////////////
 
         BeginDrawing();
-        BeginMode2D(editor->camera);
-        ClearBackground(palette_gbp[COLOR_GB_OFF]);
-        for (int y = 0; y < editor->level.height; ++y)
+
+        // Draw tiles
+        BeginMode2D(APP->camera);
         {
-            for (int x = 0; x < editor->level.width; ++x)
+            ClearBackground(palette_gbp[COLOR_GB_OFF]);
+            for (int y = 0; y < APP->level.height; ++y)
             {
-                Texture2D texture = editor->tile_set.items[editor->level.tiles[y * editor->level.width + x].index].texture;
-                DrawTexture(texture, x*8, y*8, WHITE);
+                for (int x = 0; x < APP->level.width; ++x)
+                {
+                    Texture2D texture = APP->tile_set.items[APP->level.tiles[y * APP->level.width + x].index].texture;
+                    DrawTexture(texture, x*8, y*8, WHITE);
+                }
             }
         }
-
-
         EndMode2D();
-        /////////////////////////////
-        //                         //
-        // END OF CAMERA DRAW MODE //
-        //                         //
-        /////////////////////////////
 
-        if (editor->mode == EDITOR_MODE_DRAW_PIXELS && editor->camera.zoom > ZOOM_SHOW_PIXELS)
+        // Draw hovered pixel outline
+        if (APP->mode == EDITOR_MODE_DRAW_PIXELS && APP->camera.zoom > ZOOM_SHOW_PIXELS)
         {
             Vector2 pixel_rect_min_world = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
-            Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, editor->camera);
+            Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, APP->camera);
 
-            Color draw_color = palette_gbp[editor->color_index];
+            Color draw_color = palette_gbp[APP->color_index];
             Rectangle pixel_rect = {
                 .x = pixel_rect_min.x,
                 .y = pixel_rect_min.y,
-                .width = editor->camera.zoom,
-                .height = editor->camera.zoom,
+                .width = APP->camera.zoom,
+                .height = APP->camera.zoom,
             };
             DrawRectangleRec(pixel_rect, draw_color);
             DrawRectangleLinesEx(pixel_rect, 3, BLACK);
         }
 
-        /////////////////
-        // Draw Tile Grid
-
-        if (!editor->hide_grid && editor->camera.zoom > ZOOM_SHOW_TILES)
+        // Draw tile grid
+        if (!APP->hide_grid && APP->camera.zoom > ZOOM_SHOW_TILES)
         {
-            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, editor->camera);
-            Vector2 grid_end = GetWorldToScreen2D((Vector2){editor->level.width * 8.0f, editor->level.height * 8.0f}, editor->camera);
+            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera);
+            Vector2 grid_end = GetWorldToScreen2D((Vector2){APP->level.width * 8.0f, APP->level.height * 8.0f}, APP->camera);
 
             Color line_color = (Color){0, 0, 0, 48};
 
-            for (int y = 0; y < editor->level.height * 8; ++y)
+            for (int y = 0; y < APP->level.height * 8; ++y)
             {
-                float yf = grid_start.y + y * editor->camera.zoom;
+                float yf = grid_start.y + y * APP->camera.zoom;
                 Vector2 start_pos = {grid_start.x, yf};
                 Vector2 end_pos = {grid_end.x, yf};
                 bool on_tile_boundary = (y & 0x7) == 0;
-                if (on_tile_boundary || (y & 7) && editor->camera.zoom > ZOOM_SHOW_PIXELS) {
+                if (on_tile_boundary || (y & 7) && APP->camera.zoom > ZOOM_SHOW_PIXELS) {
                     float line_width = on_tile_boundary ? 3.0f : 1.0f;
                     DrawLineEx(start_pos, end_pos, line_width, line_color);
                 }
             }
 
-            for (int x = 0; x < editor->level.width * 8; ++x)
+            for (int x = 0; x < APP->level.width * 8; ++x)
             {
-                float xf = grid_start.x + x * editor->camera.zoom;
+                float xf = grid_start.x + x * APP->camera.zoom;
                 Vector2 start_pos = {xf, grid_start.y};
                 Vector2 end_pos = {xf, grid_end.y};
                 bool on_tile_boundary = (x & 0x7) == 0;
-                if (on_tile_boundary || (x & 7) && editor->camera.zoom > ZOOM_SHOW_PIXELS) {
+                if (on_tile_boundary || (x & 7) && APP->camera.zoom > ZOOM_SHOW_PIXELS) {
                     float line_width = on_tile_boundary ? 3.0f : 1.0f;
                     DrawLineEx(start_pos, end_pos, line_width, line_color);
                 }
             }
         }
 
-        ////////////////////
-        // Draw Tile Indexes
-
-        if (editor->show_tile_indexes && editor->camera.zoom > ZOOM_SHOW_TILE_INDEXES)
+        // Draw tile indexes
+        if (APP->show_tile_indexes && APP->camera.zoom > ZOOM_SHOW_TILE_INDEXES)
         {
-            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, editor->camera);
+            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera);
 
             Font font = GetFontDefault();
-            for (int y = 0; y < editor->level.height; ++y)
+            for (int y = 0; y < APP->level.height; ++y)
             {
-                float yf = grid_start.y + y * 8.0f * editor->camera.zoom;
+                float yf = grid_start.y + y * 8.0f * APP->camera.zoom;
 
-                for (int x = 0; x < editor->level.width; ++x)
+                for (int x = 0; x < APP->level.width; ++x)
                 {
-                    float xf = grid_start.x + x * 8.0f * editor->camera.zoom;
-                    int tile_index = editor->level.tiles[y * editor->level.width + x].index;
-                    Vector2 pos = { xf + editor->camera.zoom * 0.5f, yf + editor->camera.zoom * 0.5f};
+                    float xf = grid_start.x + x * 8.0f * APP->camera.zoom;
+                    int tile_index = APP->level.tiles[y * APP->level.width + x].index;
+                    Vector2 pos = { xf + APP->camera.zoom * 0.5f, yf + APP->camera.zoom * 0.5f};
                     DrawTextEx(font, TextFormat("%d", tile_index), pos, 24, 1.0f, BLACK);
                 }
             }
         }
         
-        ////////////////
-        // Draw Tile Set
+        // Draw tile set
+        for (int i = 0; i < APP->tile_set.count; ++i)
         {
-            for (int i = 0; i < editor->tile_set.count; ++i)
-            {
-                Texture texture = editor->tile_set.items[i].texture;
+            Texture texture = APP->tile_set.items[i].texture;
 
-                Vector2 pos = {(float)(i % 16), (float)(i - (i % 16))};
-                pos = Vector2Add(Vector2Scale(pos, 8.0f), (Vector2){64.0f, 64.0f});
+            Vector2 pos = {(float)(i % 16), (float)(i - (i % 16))};
+            pos = Vector2Add(Vector2Scale(pos, 8.0f), (Vector2){64.0f, 64.0f});
 
-                DrawTextureV(texture, pos, WHITE);
-            }
+            DrawTextureV(texture, pos, WHITE);
         }
 
         EndDrawing();
