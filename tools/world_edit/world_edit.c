@@ -35,6 +35,14 @@ static Color palette_gbp[] =
     [COLOR_GB_OFF] = {194, 207, 168, 255},
 };
 
+typedef struct World_Position
+{
+    uint32_t tile_x;
+    uint32_t tile_y;
+    uint8_t pixel_x;
+    uint8_t pixel_y;
+} World_Position;
+
 typedef union GB_Tile_Data
 {
     // NOTE(jkk): 128 bits
@@ -50,8 +58,7 @@ typedef union GB_Tile_Data
 
 typedef struct Tile
 {
-    Color pixels[8*8];
-    uint8_t indexes[8*8]; // NOTE(jkk): In range 0-3
+    uint8_t color_indexes[8*8]; // NOTE(jkk): In range 0-3
     Texture2D texture;
 } Tile;
 
@@ -128,22 +135,65 @@ static Tile CreateTile(uint8_t color_index)
     assert(color_index < 4);
 
     Tile tile = {0};
+    Color pixels[8*8];
+
     for (int i = 0; i < 8*8; ++i)
     {
-        tile.pixels[i] = palette_gbp[color_index];
-        tile.indexes[i] = color_index;
+        tile.color_indexes[i] = color_index;
+        pixels[i] = palette_gbp[color_index];
     }
 
     tile.texture = LoadTextureFromImage((Image){
-        .data = (void *)&tile.pixels,
+        .data = (void *)&pixels,
         .width = 8,
         .height = 8,
         .mipmaps = 1,
         .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
     });
-    UpdateTexture(tile.texture, (void *)&tile.pixels);
+    UpdateTexture(tile.texture, (void *)&pixels);
 
     return tile;
+}
+
+World_Position GetWorldPosition(Vector2 point)
+{
+    float tile_x = point.x / 8.0f;
+    float tile_y = point.y / 8.0f;
+    World_Position result = {0};
+    result.tile_x = (uint32_t)floorf(tile_x);
+    result.tile_y = (uint32_t)floorf(tile_y);
+    result.pixel_x = (uint8_t)(8 * (tile_x - result.tile_x));
+    result.pixel_y = (uint8_t)(8 * (tile_y - result.tile_y));
+
+    return result;
+}
+
+World_Tile *GetWorldTile(Editor *editor, uint32_t tile_x, uint32_t tile_y)
+{
+    Level *level = &editor->level;
+    World_Tile *world_tile = NULL;
+    if (tile_x >= 0 && tile_x < level->width &&
+        tile_y >= 0 && tile_y < level->height)
+    {
+        world_tile = &level->tiles[tile_y * level->width + tile_x];
+    }
+
+    return world_tile;
+}
+
+Tile *GetTile(Editor *editor, World_Tile *world_tile)
+{
+    assert(world_tile->index < editor->tile_set.count);
+    return &editor->tile_set.items[world_tile->index];
+}
+
+void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_index)
+{
+    assert(pixel_x >= 0 && pixel_x < 8 && pixel_y >= 0 && pixel_y < 8);
+
+    tile->color_indexes[pixel_y * 8 + pixel_x] = color_index;
+    Color pixel = palette_gbp[color_index];
+    UpdateTextureRec(tile->texture, (Rectangle){(float)pixel_x, (float)pixel_y, 1.0f, 1.0f}, &pixel);
 }
 
 int main(int argc, char **argv)
@@ -198,34 +248,11 @@ int main(int argc, char **argv)
 
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
-            // GetTileAtPoint
-            {
-                float tile_x = mouse_pos_world.x / 8.0f;
-                float tile_y = mouse_pos_world.y / 8.0f;
-                int tile_ix = (int)tile_x;
-                int tile_iy = (int)tile_y;
-
-                int px_x = (int)(8 * (tile_x - tile_ix));
-                int px_y = (int)(8 * (tile_y - tile_iy));
-
-                World_Tile *world_tile = NULL;
-                if (tile_ix >= 0 && tile_ix < editor->level.width &&
-                    tile_iy >= 0 && tile_iy < editor->level.height)
-                {
-                    world_tile = &editor->level.tiles[tile_iy * editor->level.width + tile_ix];
-
-                    assert(px_x >= 0 && px_x < 8 && px_y >= 0 && px_y < 8);
-                    uint8_t color_index = editor->color_index;
-
-                    Tile *tile = &editor->tile_set.items[world_tile->index];
-                    tile->pixels[px_y * 8 + px_x] = palette_gbp[color_index];
-                    tile->indexes[px_y * 8 + px_x] = color_index;
-
-                    UpdateTexture(tile->texture, (void *)&tile->pixels);
-                }
-            }
+            World_Position pos = GetWorldPosition(mouse_pos_world);
+            World_Tile *world_tile = GetWorldTile(editor, pos.tile_x, pos.tile_y);
+            Tile *tile = GetTile(editor, world_tile);
+            SetTilePixel(tile, pos.pixel_x, pos.pixel_y, editor->color_index);
         }
-
 
         BeginDrawing();
         BeginMode2D(editor->camera);
