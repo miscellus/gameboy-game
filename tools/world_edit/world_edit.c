@@ -15,7 +15,7 @@
 #define ZOOM_MAX 60.0f
 #define ZOOM_SHOW_PIXELS 10.0f
 #define ZOOM_SHOW_TILES 2.5f
-#define ZOOM_SHOW_TILE_INDEXES ZOOM_SHOW_TILES
+#define ZOOM_SHOW_TILE_INDEXES 7.0f
 
 typedef enum Palette_Index
 {
@@ -91,7 +91,11 @@ typedef enum Editor_Mode
 
 typedef struct App
 {
-    Camera2D camera;
+    // View stuff
+    Camera2D camera_world;
+    float side_panel_width;
+    float side_panel_width_min;
+
     Vector2 pointer_prev;
     uint8_t color_index; // NOTE(jkk): In range 0-3
     Editor_Mode mode;
@@ -199,11 +203,11 @@ void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_in
 void InitApp(void)
 {
     APP = calloc(1, sizeof(*APP));
-    APP->camera.offset = (Vector2){0, 0};
-    APP->camera.target = (Vector2){0, 0};
-    APP->camera.rotation = 0;
-    APP->camera.zoom = 5.0f;
+    APP->camera_world.zoom = 5.0f;
     APP->mode = EDITOR_MODE_DRAW_PIXELS;
+
+    APP->side_panel_width_min = 300.0f;
+    APP->side_panel_width = 200.0f;
 
     APP->level.width = 128;
     APP->level.height = 64;
@@ -214,13 +218,124 @@ void InitApp(void)
     da_append(&APP->tile_set, tile0);
 }
 
+Rectangle CutRectGetTop(Rectangle r, float s) { r.height = s; return r; }
+Rectangle CutRectGetBottom(Rectangle r, float s) { r.y += s; r.height -= s; return r; }
+Rectangle CutRectGetLeft(Rectangle r, float s) { r.width = s; return r; }
+Rectangle CutRectGetRight(Rectangle r, float s) { r.x += s; r.width -= s; return r; }
+Rectangle PadRect(Rectangle r, float s) { r.x += s; r.y += s; r.width -= 2*s; r.height -= 2*s; return r; }
+
+void DrawWorldView(Rectangle view, Vector2 mouse_pos_world)
+{
+    BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
+    ClearBackground((Color){170, 170, 170, 255});
+
+    // Draw tiles
+    BeginMode2D(APP->camera_world);
+    {
+        for (int y = 0; y < APP->level.height; ++y)
+        {
+            for (int x = 0; x < APP->level.width; ++x)
+            {
+                Texture2D texture = APP->tile_set.items[APP->level.tiles[y * APP->level.width + x].index].texture;
+                DrawTexture(texture, x*8, y*8, WHITE);
+            }
+        }
+    }
+    EndMode2D();
+
+
+
+    // Draw hovered pixel outline
+    if (APP->mode == EDITOR_MODE_DRAW_PIXELS && APP->camera_world.zoom > ZOOM_SHOW_PIXELS)
+    {
+        Vector2 pixel_rect_min_world = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
+        Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, APP->camera_world);
+
+        Color draw_color = palette_gbp[APP->color_index];
+        Rectangle pixel_rect = {
+            .x = pixel_rect_min.x,
+            .y = pixel_rect_min.y,
+            .width = APP->camera_world.zoom,
+            .height = APP->camera_world.zoom,
+        };
+        DrawRectangleRec(pixel_rect, draw_color);
+        DrawRectangleLinesEx(pixel_rect, 3, BLACK);
+    }
+
+    // Draw tile grid
+    if (!APP->hide_grid && APP->camera_world.zoom > ZOOM_SHOW_TILES)
+    {
+        Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera_world);
+        Vector2 grid_end = GetWorldToScreen2D((Vector2){APP->level.width * 8.0f, APP->level.height * 8.0f}, APP->camera_world);
+
+        Color line_color = (Color){0, 0, 0, 48};
+
+        for (int y = 0; y < APP->level.height * 8; ++y)
+        {
+            float yf = grid_start.y + y * APP->camera_world.zoom;
+            Vector2 start_pos = {grid_start.x, yf};
+            Vector2 end_pos = {grid_end.x, yf};
+            bool on_tile_boundary = (y & 0x7) == 0;
+            if (on_tile_boundary || (y & 7) && APP->camera_world.zoom > ZOOM_SHOW_PIXELS) {
+                float line_width = on_tile_boundary ? 3.0f : 1.0f;
+                DrawLineEx(start_pos, end_pos, line_width, line_color);
+            }
+        }
+
+        for (int x = 0; x < APP->level.width * 8; ++x)
+        {
+            float xf = grid_start.x + x * APP->camera_world.zoom;
+            Vector2 start_pos = {xf, grid_start.y};
+            Vector2 end_pos = {xf, grid_end.y};
+            bool on_tile_boundary = (x & 0x7) == 0;
+            if (on_tile_boundary || (x & 7) && APP->camera_world.zoom > ZOOM_SHOW_PIXELS) {
+                float line_width = on_tile_boundary ? 3.0f : 1.0f;
+                DrawLineEx(start_pos, end_pos, line_width, line_color);
+            }
+        }
+    }
+
+    // Draw tile indexes
+    if (APP->show_tile_indexes && APP->camera_world.zoom > ZOOM_SHOW_TILE_INDEXES)
+    {
+        Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera_world);
+
+        Font font = GetFontDefault();
+        for (int y = 0; y < APP->level.height; ++y)
+        {
+            float yf = grid_start.y + y * 8.0f * APP->camera_world.zoom;
+
+            for (int x = 0; x < APP->level.width; ++x)
+            {
+                float xf = grid_start.x + x * 8.0f * APP->camera_world.zoom;
+                int tile_index = APP->level.tiles[y * APP->level.width + x].index;
+                Vector2 pos = { xf + APP->camera_world.zoom * 0.2f, yf + APP->camera_world.zoom * 0.2f};
+                DrawTextEx(font, TextFormat("%d", tile_index), pos, 48, 1.0f, BLACK);
+            }
+        }
+    }
+
+    // Draw tile set
+    for (int i = 0; i < APP->tile_set.count; ++i)
+    {
+        Texture texture = APP->tile_set.items[i].texture;
+
+        Vector2 pos = {(float)(i % 16), (float)(i - (i % 16))};
+        pos = Vector2Add(Vector2Scale(pos, 8.0f), (Vector2){64.0f, 64.0f});
+
+        DrawTextureV(texture, pos, WHITE);
+    }
+
+    EndScissorMode();
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
     printf("Hello, World!\n");
 
-    InitWindow(960, 576, "Hello, Raylib!");
+    InitWindow(1024, 768, "Game Boy World Editor");
     SetWindowState(FLAG_WINDOW_RESIZABLE);
     SetTargetFPS(60);
 
@@ -237,7 +352,7 @@ int main(int argc, char **argv)
         {
             mouse_delta = (Vector2){0};
         }
-        ViewUpdate(&APP->camera, mouse_scroll, mouse_pos_screen, ZOOM_MIN, ZOOM_MAX, mouse_delta);
+        ViewUpdate(&APP->camera_world, mouse_scroll, mouse_pos_screen, ZOOM_MIN, ZOOM_MAX, mouse_delta);
 
         if (IsKeyPressed(KEY_G))  APP->hide_grid = !APP->hide_grid;
         if (IsKeyPressed(KEY_I))  APP->show_tile_indexes = !APP->show_tile_indexes;
@@ -247,7 +362,7 @@ int main(int argc, char **argv)
         if (IsKeyPressed(KEY_THREE)) APP->color_index = COLOR_GB_MID_LIGHT;
         if (IsKeyPressed(KEY_FOUR)) APP->color_index = COLOR_GB_LIGHT;
 
-        Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, APP->camera);
+        Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, APP->camera_world);
 
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
@@ -264,102 +379,21 @@ int main(int argc, char **argv)
         ///////////////////////////
 
         BeginDrawing();
+        ClearBackground((Color){192, 192, 192, 255});
+        Rectangle render_rect = {0.0f, 0.0f, (float)GetRenderWidth(), (float)GetRenderHeight()};
+        float top_bar_height = 48;
+        // Rectangle top_bar_rect = CutRectGetTop(render_rect, top_bar_height);
+        Rectangle content_rect = CutRectGetBottom(render_rect, top_bar_height);
 
-        // Draw tiles
-        BeginMode2D(APP->camera);
-        {
-            ClearBackground(palette_gbp[COLOR_GB_OFF]);
-            for (int y = 0; y < APP->level.height; ++y)
-            {
-                for (int x = 0; x < APP->level.width; ++x)
-                {
-                    Texture2D texture = APP->tile_set.items[APP->level.tiles[y * APP->level.width + x].index].texture;
-                    DrawTexture(texture, x*8, y*8, WHITE);
-                }
-            }
-        }
-        EndMode2D();
+        float side_panel_width = content_rect.width - 400.0f;
+        // float side_panel_width_min = 200.0f;
 
-        // Draw hovered pixel outline
-        if (APP->mode == EDITOR_MODE_DRAW_PIXELS && APP->camera.zoom > ZOOM_SHOW_PIXELS)
-        {
-            Vector2 pixel_rect_min_world = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
-            Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, APP->camera);
+        Rectangle world_view = PadRect(CutRectGetLeft(content_rect, side_panel_width), 10);
 
-            Color draw_color = palette_gbp[APP->color_index];
-            Rectangle pixel_rect = {
-                .x = pixel_rect_min.x,
-                .y = pixel_rect_min.y,
-                .width = APP->camera.zoom,
-                .height = APP->camera.zoom,
-            };
-            DrawRectangleRec(pixel_rect, draw_color);
-            DrawRectangleLinesEx(pixel_rect, 3, BLACK);
-        }
+        DrawWorldView(world_view, mouse_pos_world);
+        DrawRectangleLinesEx(world_view, 3, (Color){160, 160, 160, 255});
 
-        // Draw tile grid
-        if (!APP->hide_grid && APP->camera.zoom > ZOOM_SHOW_TILES)
-        {
-            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera);
-            Vector2 grid_end = GetWorldToScreen2D((Vector2){APP->level.width * 8.0f, APP->level.height * 8.0f}, APP->camera);
-
-            Color line_color = (Color){0, 0, 0, 48};
-
-            for (int y = 0; y < APP->level.height * 8; ++y)
-            {
-                float yf = grid_start.y + y * APP->camera.zoom;
-                Vector2 start_pos = {grid_start.x, yf};
-                Vector2 end_pos = {grid_end.x, yf};
-                bool on_tile_boundary = (y & 0x7) == 0;
-                if (on_tile_boundary || (y & 7) && APP->camera.zoom > ZOOM_SHOW_PIXELS) {
-                    float line_width = on_tile_boundary ? 3.0f : 1.0f;
-                    DrawLineEx(start_pos, end_pos, line_width, line_color);
-                }
-            }
-
-            for (int x = 0; x < APP->level.width * 8; ++x)
-            {
-                float xf = grid_start.x + x * APP->camera.zoom;
-                Vector2 start_pos = {xf, grid_start.y};
-                Vector2 end_pos = {xf, grid_end.y};
-                bool on_tile_boundary = (x & 0x7) == 0;
-                if (on_tile_boundary || (x & 7) && APP->camera.zoom > ZOOM_SHOW_PIXELS) {
-                    float line_width = on_tile_boundary ? 3.0f : 1.0f;
-                    DrawLineEx(start_pos, end_pos, line_width, line_color);
-                }
-            }
-        }
-
-        // Draw tile indexes
-        if (APP->show_tile_indexes && APP->camera.zoom > ZOOM_SHOW_TILE_INDEXES)
-        {
-            Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera);
-
-            Font font = GetFontDefault();
-            for (int y = 0; y < APP->level.height; ++y)
-            {
-                float yf = grid_start.y + y * 8.0f * APP->camera.zoom;
-
-                for (int x = 0; x < APP->level.width; ++x)
-                {
-                    float xf = grid_start.x + x * 8.0f * APP->camera.zoom;
-                    int tile_index = APP->level.tiles[y * APP->level.width + x].index;
-                    Vector2 pos = { xf + APP->camera.zoom * 0.5f, yf + APP->camera.zoom * 0.5f};
-                    DrawTextEx(font, TextFormat("%d", tile_index), pos, 24, 1.0f, BLACK);
-                }
-            }
-        }
-        
-        // Draw tile set
-        for (int i = 0; i < APP->tile_set.count; ++i)
-        {
-            Texture texture = APP->tile_set.items[i].texture;
-
-            Vector2 pos = {(float)(i % 16), (float)(i - (i % 16))};
-            pos = Vector2Add(Vector2Scale(pos, 8.0f), (Vector2){64.0f, 64.0f});
-
-            DrawTextureV(texture, pos, WHITE);
-        }
+        // DrawSidePanel(CutRectGetRight(render_rect, side_panel_width));
 
         EndDrawing();
 
