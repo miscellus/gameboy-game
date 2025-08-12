@@ -50,7 +50,12 @@ typedef struct World_Position
     uint8_t pixel_y;
 } World_Position;
 
-typedef union GB_Tile_Data
+typedef struct Tile_Line_GB
+{
+    uint8_t bit_planes[2];
+} Tile_Line_GB;
+
+typedef union Tile_GB
 {
     // NOTE(jkk): 128 bits
     //
@@ -59,9 +64,9 @@ typedef union GB_Tile_Data
     // color ID of each pixel, and the second byte specifies the most
     // significant bit. In both bytes, bit 7 represents the leftmost pixel, and
     // bit 0 the rightmost.
-    uint8_t u8[16];
-    uint64_t u64[2];
-} GB_Tile_Data;
+    Tile_Line_GB lines[8];
+    uint64_t u64s[2];
+} Tile_GB;
 
 typedef struct Tile
 {
@@ -104,6 +109,7 @@ typedef struct App
     float side_panel_width_min;
 
     float tile_picker_zoom;
+    float tile_picker_scroll_offset;
 
     Vector2 mouse_delta;
     uint8_t color_index; // NOTE(jkk): In range 0-3
@@ -143,6 +149,8 @@ void ViewUpdate(Camera2D *camera, float zoom_input, Vector2 zoom_target, float z
     }
 }
 
+
+
 static Tile CreateTile(uint8_t color_index)
 {
     assert(color_index < 4);
@@ -166,6 +174,23 @@ static Tile CreateTile(uint8_t color_index)
     UpdateTexture(tile.texture, (void *)&pixels);
 
     return tile;
+}
+
+Tile_GB TileToGB(Tile tile)
+{
+    Tile_GB tile_gb = {0};
+
+    for (int y = 0; y < 8; ++y)
+    {
+        for (int x = 0; x < 8; ++x)
+        {
+            uint8_t pixel = tile.color_indexes[8*y + x];
+            if (pixel & 1) tile_gb.lines[y].bit_planes[0] |= (0x80 >> x);
+            if (pixel & 2) tile_gb.lines[y].bit_planes[1] |= (0x80 >> x);
+        }
+    }
+
+    return tile_gb;
 }
 
 World_Position GetWorldPosition(Vector2 point)
@@ -223,10 +248,11 @@ void InitApp(void)
     APP->level.height = 64;
     APP->level.tiles = calloc(APP->level.width * APP->level.height, sizeof(*APP->level.tiles));
 
-    // Create initial tile 0
-    Tile tile0 = CreateTile(COLOR_GB_LIGHT);
+    // Create 256 uniqie tiles corresponding to Game Boy Tile Set
     for (int i = 0; i < 256; ++i)
-    da_append(&APP->tile_set, tile0);
+    {
+        da_append(&APP->tile_set, CreateTile(COLOR_GB_LIGHT));
+    }
 }
 
 Rectangle CutRectGetTop(Rectangle r, float s) { r.height = s; return r; }
@@ -287,16 +313,24 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
         Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera_world);
         Vector2 grid_end = GetWorldToScreen2D((Vector2){APP->level.width * 8.0f, APP->level.height * 8.0f}, APP->camera_world);
 
-        Color line_color = (Color){0, 0, 0, 48};
+        bool show_pixels = APP->camera_world.zoom > ZOOM_SHOW_PIXELS;
 
         for (int y = 0; y < APP->level.height * 8; ++y)
         {
             float yf = grid_start.y + y * APP->camera_world.zoom;
             Vector2 start_pos = {grid_start.x, yf};
             Vector2 end_pos = {grid_end.x, yf};
-            bool on_tile_boundary = (y & 0x7) == 0;
-            if (on_tile_boundary || (y & 7) && APP->camera_world.zoom > ZOOM_SHOW_PIXELS) {
-                float line_width = on_tile_boundary ? 3.0f : 1.0f;
+            bool on_tile_boundary = !(y & 0x7);
+            if (on_tile_boundary || show_pixels)
+            {
+                Color line_color = (Color){0, 0, 0, 48};
+                float line_width = 1.0f;
+                if (on_tile_boundary && show_pixels)
+                {
+                    line_color.a = 60;
+                    line_width = 3.0f;
+                }
+
                 DrawLineEx(start_pos, end_pos, line_width, line_color);
             }
         }
@@ -306,9 +340,17 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
             float xf = grid_start.x + x * APP->camera_world.zoom;
             Vector2 start_pos = {xf, grid_start.y};
             Vector2 end_pos = {xf, grid_end.y};
-            bool on_tile_boundary = (x & 0x7) == 0;
-            if (on_tile_boundary || (x & 7) && APP->camera_world.zoom > ZOOM_SHOW_PIXELS) {
-                float line_width = on_tile_boundary ? 3.0f : 1.0f;
+            bool on_tile_boundary = !(x & 0x7);
+            if (on_tile_boundary || show_pixels)
+            {
+                Color line_color = (Color){0, 0, 0, 48};
+                float line_width = 1.0f;
+                if (on_tile_boundary && show_pixels)
+                {
+                    line_color.a = 60;
+                    line_width = 3.0f;
+                }
+
                 DrawLineEx(start_pos, end_pos, line_width, line_color);
             }
         }
@@ -367,6 +409,7 @@ void DrawSidePanel(Rectangle view)
         {
             view.x + gap + (i%tiles_per_row) * advance,
             view.y + (i/tiles_per_row) * (tile_size + gap_min)
+                + APP->tile_picker_scroll_offset
         };
         // DrawTextureV(texture, pos, WHITE);
         DrawTexturePro(texture, (Rectangle){0,0,8,8}, (Rectangle){pos.x, pos.y, tile_size, tile_size}, (Vector2){0}, 0, WHITE);
@@ -412,16 +455,32 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
             }
         }
     }
+    else if (APP->mode == MODE_DRAW_TILES)
+    {
+    }
+    else
+    {
+        TODO("Unimplemented app mode");
+    }
 
 }
 
-void UpdateSidePanelView(float zoom_input)
+void UpdateSidePanelView(float scroll_input)
 {
-    if (zoom_input)
+    if (scroll_input)
     {
-        float zoom_factor = 0.1f * zoom_input;
-        APP->tile_picker_zoom += zoom_factor * APP->tile_picker_zoom;
-        APP->tile_picker_zoom = Clamp(APP->tile_picker_zoom, ZOOM_MIN_TILE_PICKER, ZOOM_MAX_TILE_PICKER);
+        if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+        {
+            float zoom_factor = 0.1f * scroll_input;
+            APP->tile_picker_zoom += zoom_factor * APP->tile_picker_zoom;
+            APP->tile_picker_zoom = Clamp(APP->tile_picker_zoom, ZOOM_MIN_TILE_PICKER, ZOOM_MAX_TILE_PICKER);
+        }
+        else
+        {
+            APP->tile_picker_scroll_offset += scroll_input * 8 * APP->tile_picker_zoom;
+            // @hardcode
+            APP->tile_picker_scroll_offset = Clamp(APP->tile_picker_scroll_offset, -8 * 100 * APP->tile_picker_zoom, 0);
+        }
     }
 
 }
@@ -464,7 +523,6 @@ int main(int argc, char **argv)
                     world_view.height,
                 }))
         {
-            // APP->resizing_world_view = true;
         }
 
         if (CheckCollisionPointRec(mouse_pos_screen, world_view))
