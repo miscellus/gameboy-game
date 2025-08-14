@@ -105,19 +105,22 @@ typedef struct App
 {
     // View stuff
     Camera2D camera_world;
+    
     float side_panel_width;
     float side_panel_width_min;
-
     float tile_picker_zoom;
     float tile_picker_scroll_offset;
 
-    Vector2 mouse_delta;
-    uint8_t color_index; // NOTE(jkk): In range 0-3
+    Vector2 mouse_previous;
+    uint8_t current_color_idx; // NOTE(jkk): In range 0-3
+    uint32_t current_tile_idx;
     Editor_Mode mode;
     bool hide_grid;
     bool show_tile_indexes;
+    bool auto_new_tile;
     Level level;
     Tiles tile_set;
+    Tile edit_tile; // The tile currently being drawn
 } App;
 
 App *APP;
@@ -253,6 +256,8 @@ void InitApp(void)
     {
         da_append(&APP->tile_set, CreateTile(COLOR_GB_LIGHT));
     }
+
+    APP->edit_tile = CreateTile(COLOR_GB_MID_DARK);
 }
 
 Rectangle CutRectGetTop(Rectangle r, float s) { r.height = s; return r; }
@@ -279,6 +284,7 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
     // Draw tiles
     BeginMode2D(APP->camera_world);
     {
+
         for (int y = 0; y < APP->level.height; ++y)
         {
             for (int x = 0; x < APP->level.width; ++x)
@@ -287,6 +293,10 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
                 DrawTexture(texture, x*8, y*8, WHITE);
             }
         }
+        
+        World_Position edit_pos = GetWorldPosition(mouse_pos_world);
+
+        DrawTexture(APP->edit_tile.texture, edit_pos.tile_x*8, edit_pos.tile_y*8, WHITE);
     }
     EndMode2D();
 
@@ -296,7 +306,7 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
         Vector2 pixel_rect_min_world = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
         Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, APP->camera_world);
 
-        Color draw_color = palette_gbp[APP->color_index];
+        Color draw_color = palette_gbp[APP->current_color_idx];
         Rectangle pixel_rect = {
             .x = pixel_rect_min.x,
             .y = pixel_rect_min.y,
@@ -419,6 +429,20 @@ void DrawSidePanel(Rectangle view)
     EndScissorMode();
 }
 
+Tile *GetOrCreateTileFrom(Tile src_tile)
+{
+    UNUSED(src_tile);
+    TODO("GetOrCreateTileFrom");
+
+}
+
+void SetWorldTile(World_Tile *world_tile, Tile *tile)
+{
+    UNUSED(world_tile);
+    UNUSED(tile);
+    TODO("SetWorldTile");
+}
+
 void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_scroll)
 {
     Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, APP->camera_world);
@@ -438,10 +462,12 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
 
     if (APP->mode == MODE_DRAW_PIXELS)
     {
-        if (IsKeyPressed(KEY_ONE)) APP->color_index = COLOR_GB_DARK;
-        if (IsKeyPressed(KEY_TWO)) APP->color_index = COLOR_GB_MID_DARK;
-        if (IsKeyPressed(KEY_THREE)) APP->color_index = COLOR_GB_MID_LIGHT;
-        if (IsKeyPressed(KEY_FOUR)) APP->color_index = COLOR_GB_LIGHT;
+        if (IsKeyPressed(KEY_ONE)) APP->current_color_idx = COLOR_GB_DARK;
+        if (IsKeyPressed(KEY_TWO)) APP->current_color_idx = COLOR_GB_MID_DARK;
+        if (IsKeyPressed(KEY_THREE)) APP->current_color_idx = COLOR_GB_MID_LIGHT;
+        if (IsKeyPressed(KEY_FOUR)) APP->current_color_idx = COLOR_GB_LIGHT;
+
+        if (IsKeyPressed(KEY_A)) APP->auto_new_tile = !APP->auto_new_tile;
 
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
@@ -450,13 +476,50 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
 
             if (world_tile)
             {
-                Tile *tile = GetTile(world_tile);
-                SetTilePixel(tile, pos.pixel_x, pos.pixel_y, APP->color_index);
+                Tile *tile;
+                if (APP->auto_new_tile)
+                {
+                    World_Position pos_prev = GetWorldPosition(GetScreenToWorld2D(APP->mouse_previous, APP->camera_world));
+                    World_Tile *world_tile_prev = GetWorldTile(pos_prev.tile_x, pos_prev.tile_y);
+
+                    if (world_tile_prev && pos_prev.tile_x != pos.tile_x || pos_prev.tile_y != pos.tile_y)
+                    {
+                        Tile *new_tile = GetOrCreateTileFrom(APP->edit_tile);
+                        SetWorldTile(world_tile_prev, new_tile);
+                    }
+
+                    tile = &APP->edit_tile;
+                }
+                else
+                {
+                    tile = GetTile(world_tile);
+                }
+                SetTilePixel(tile, pos.pixel_x, pos.pixel_y, APP->current_color_idx);
             }
         }
     }
     else if (APP->mode == MODE_DRAW_TILES)
     {
+        if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+        {
+            int change = -!!IsKeyPressed(KEY_UP) + !!IsKeyPressed(KEY_DOWN);
+            if (change)
+            {
+                APP->current_tile_idx += change;
+                if (APP->current_tile_idx < 0) APP->current_tile_idx = 0;
+                else if (APP->current_tile_idx > APP->tile_set.count - 1) APP->current_tile_idx = (uint32_t)APP->tile_set.count - 1;
+            }
+        }
+
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+        {
+            World_Position pos = GetWorldPosition(mouse_pos_world);
+            World_Tile *world_tile = GetWorldTile(pos.tile_x, pos.tile_y);
+            if (world_tile)
+            {
+                world_tile->index = APP->current_tile_idx;
+            }
+        }
     }
     else
     {
@@ -497,8 +560,6 @@ int main(int argc, char **argv)
 
     InitApp();
 
-
-    Vector2 pointer_prev = GetMousePosition();
     while (!WindowShouldClose())
     {
         // Calculate sub views
@@ -509,24 +570,12 @@ int main(int argc, char **argv)
         Rectangle side_panel_view = PadRectEx(CutRectGetRight(content_view, side_panel_width), 10, 10, 10, 0);
 
         Vector2 mouse_pos_screen = GetMousePosition();
-        APP->mouse_delta = Vector2Subtract(mouse_pos_screen, pointer_prev);
-        pointer_prev = mouse_pos_screen;
+        Vector2 mouse_delta = Vector2Subtract(mouse_pos_screen, APP->mouse_previous);
+        APP->mouse_previous = mouse_pos_screen;
         float mouse_scroll = GetMouseWheelMoveV().y;
 
-        // @hack @hardcode
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)
-            && CheckCollisionPointRec(mouse_pos_screen,
-                (Rectangle){
-                    world_view.x + world_view.width,
-                    world_view.y,
-                    10,
-                    world_view.height,
-                }))
-        {
-        }
-
         if (CheckCollisionPointRec(mouse_pos_screen, world_view))
-            UpdateWorldView(mouse_pos_screen, APP->mouse_delta, mouse_scroll);
+            UpdateWorldView(mouse_pos_screen, mouse_delta, mouse_scroll);
 
         if (CheckCollisionPointRec(mouse_pos_screen, side_panel_view))
             UpdateSidePanelView(mouse_scroll);
