@@ -105,7 +105,7 @@ typedef struct App
 {
     // View stuff
     Camera2D camera_world;
-    
+
     float side_panel_width;
     float side_panel_width_min;
     float tile_picker_zoom;
@@ -152,7 +152,36 @@ void ViewUpdate(Camera2D *camera, float zoom_input, Vector2 zoom_target, float z
     }
 }
 
+Texture CreateTileTexture(Color pixels[8*8])
+{
+    Texture texture = LoadTextureFromImage((Image){
+        .data = (void *)pixels,
+        .width = 8,
+        .height = 8,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+    });
+    UpdateTexture(texture, (void *)pixels);
+    return texture;
+}
 
+static Tile CreateCloneTile(Tile *src_tile)
+{
+    Tile tile = {0};
+    Color pixels[8*8];
+
+    for (int i = 0; i < 8*8; ++i)
+    {
+        uint8_t color_index = src_tile->color_indexes[i];
+        assert(color_index < 4);
+        tile.color_indexes[i] = color_index;
+        pixels[i] = palette_gbp[color_index];
+    }
+
+    tile.texture = CreateTileTexture(pixels);
+
+    return tile;
+}
 
 static Tile CreateTile(uint8_t color_index)
 {
@@ -167,19 +196,12 @@ static Tile CreateTile(uint8_t color_index)
         pixels[i] = palette_gbp[color_index];
     }
 
-    tile.texture = LoadTextureFromImage((Image){
-        .data = (void *)&pixels,
-        .width = 8,
-        .height = 8,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    });
-    UpdateTexture(tile.texture, (void *)&pixels);
+    tile.texture = CreateTileTexture(pixels);
 
     return tile;
 }
 
-Tile_GB TileToGB(Tile tile)
+Tile_GB TileToGB(Tile *tile)
 {
     Tile_GB tile_gb = {0};
 
@@ -187,7 +209,7 @@ Tile_GB TileToGB(Tile tile)
     {
         for (int x = 0; x < 8; ++x)
         {
-            uint8_t pixel = tile.color_indexes[8*y + x];
+            uint8_t pixel = tile->color_indexes[8*y + x];
             if (pixel & 1) tile_gb.lines[y].bit_planes[0] |= (0x80 >> x);
             if (pixel & 2) tile_gb.lines[y].bit_planes[1] |= (0x80 >> x);
         }
@@ -251,11 +273,7 @@ void InitApp(void)
     APP->level.height = 64;
     APP->level.tiles = calloc(APP->level.width * APP->level.height, sizeof(*APP->level.tiles));
 
-    // Create 256 uniqie tiles corresponding to Game Boy Tile Set
-    for (int i = 0; i < 256; ++i)
-    {
-        da_append(&APP->tile_set, CreateTile(COLOR_GB_LIGHT));
-    }
+    da_append(&APP->tile_set, CreateTile(COLOR_GB_LIGHT));
 
     APP->edit_tile = CreateTile(COLOR_GB_MID_DARK);
 }
@@ -293,7 +311,7 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
                 DrawTexture(texture, x*8, y*8, WHITE);
             }
         }
-        
+
         World_Position edit_pos = GetWorldPosition(mouse_pos_world);
 
         DrawTexture(APP->edit_tile.texture, edit_pos.tile_x*8, edit_pos.tile_y*8, WHITE);
@@ -400,7 +418,7 @@ void DrawSidePanel(Rectangle view)
     {
         tile_size = view.width;
     }
-    
+
     float gap_min = 5;
 
     int tiles_per_row = (int)((view.width) / (tile_size + gap_min));
@@ -429,18 +447,39 @@ void DrawSidePanel(Rectangle view)
     EndScissorMode();
 }
 
-Tile *GetOrCreateTileFrom(Tile src_tile)
+static inline bool TileEqualsGB(Tile_GB a, Tile_GB b)
 {
-    UNUSED(src_tile);
-    TODO("GetOrCreateTileFrom");
-
+    return 0 == memcmp(&a, &b, sizeof(a));
 }
 
-void SetWorldTile(World_Tile *world_tile, Tile *tile)
+void CopyTile(Tile *dst, Tile *src)
 {
-    UNUSED(world_tile);
-    UNUSED(tile);
-    TODO("SetWorldTile");
+    Color pixels[8*8];
+    for (int i = 0; i < 8*8; ++i)
+    {
+        uint8_t color_index = src->color_indexes[i];
+        dst->color_indexes[i] = color_index;
+        pixels[i] = palette_gbp[color_index];
+    }
+    UpdateTexture(dst->texture, pixels);
+}
+
+uint32_t GetOrCreateTileFrom(Tile *src_tile)
+{
+    Tile_GB src_tile_gb = TileToGB(src_tile);
+
+    for (int i = 0; i < APP->tile_set.count; ++i)
+    {
+        Tile *tile = &APP->tile_set.items[i];
+        Tile_GB tile_gb = TileToGB(tile);
+        if (TileEqualsGB(src_tile_gb, tile_gb))
+        {
+            return i;
+        }
+    }
+
+    da_append(&APP->tile_set, CreateCloneTile(src_tile));
+    return (uint32_t)(APP->tile_set.count - 1);
 }
 
 void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_scroll)
@@ -482,10 +521,11 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
                     World_Position pos_prev = GetWorldPosition(GetScreenToWorld2D(APP->mouse_previous, APP->camera_world));
                     World_Tile *world_tile_prev = GetWorldTile(pos_prev.tile_x, pos_prev.tile_y);
 
-                    if (world_tile_prev && pos_prev.tile_x != pos.tile_x || pos_prev.tile_y != pos.tile_y)
+                    if (world_tile_prev && (pos_prev.tile_x != pos.tile_x || pos_prev.tile_y != pos.tile_y))
                     {
-                        Tile *new_tile = GetOrCreateTileFrom(APP->edit_tile);
-                        SetWorldTile(world_tile_prev, new_tile);
+                        uint32_t new_tile_idx = GetOrCreateTileFrom(&APP->edit_tile);
+                        world_tile_prev->index = new_tile_idx;
+                        CopyTile(&APP->edit_tile, GetTile(world_tile));
                     }
 
                     tile = &APP->edit_tile;
@@ -571,7 +611,6 @@ int main(int argc, char **argv)
 
         Vector2 mouse_pos_screen = GetMousePosition();
         Vector2 mouse_delta = Vector2Subtract(mouse_pos_screen, APP->mouse_previous);
-        APP->mouse_previous = mouse_pos_screen;
         float mouse_scroll = GetMouseWheelMoveV().y;
 
         if (CheckCollisionPointRec(mouse_pos_screen, world_view))
@@ -579,6 +618,8 @@ int main(int argc, char **argv)
 
         if (CheckCollisionPointRec(mouse_pos_screen, side_panel_view))
             UpdateSidePanelView(mouse_scroll);
+
+        APP->mouse_previous = mouse_pos_screen;
 
         ///////////////////////////
         //                       //
