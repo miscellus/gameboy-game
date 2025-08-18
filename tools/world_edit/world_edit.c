@@ -114,6 +114,8 @@ typedef struct App
     Vector2 mouse_previous;
     uint8_t current_color_idx; // NOTE(jkk): In range 0-3
     uint32_t current_tile_idx;
+
+    // Mode stuff
     Editor_Mode mode;
     bool hide_grid;
     bool show_tile_indexes;
@@ -312,9 +314,11 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
             }
         }
 
-        World_Position edit_pos = GetWorldPosition(mouse_pos_world);
-
-        DrawTexture(APP->edit_tile.texture, edit_pos.tile_x*8, edit_pos.tile_y*8, WHITE);
+        if (APP->auto_new_tile && IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+        {
+            World_Position edit_pos = GetWorldPosition(mouse_pos_world);
+            DrawTexture(APP->edit_tile.texture, edit_pos.tile_x*8, edit_pos.tile_y*8, WHITE);
+        }
     }
     EndMode2D();
 
@@ -508,23 +512,28 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
 
         if (IsKeyPressed(KEY_A)) APP->auto_new_tile = !APP->auto_new_tile;
 
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
-        {
-            World_Position pos = GetWorldPosition(mouse_pos_world);
-            World_Tile *world_tile = GetWorldTile(pos.tile_x, pos.tile_y);
+        World_Position pos = GetWorldPosition(mouse_pos_world);
+        World_Tile *world_tile = GetWorldTile(pos.tile_x, pos.tile_y);
 
-            if (world_tile)
+        if (world_tile)
+        {
+            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
             {
                 Tile *tile;
                 if (APP->auto_new_tile)
                 {
+                    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+                    {
+                        CopyTile(&APP->edit_tile, GetTile(world_tile));
+                    }
+
                     World_Position pos_prev = GetWorldPosition(GetScreenToWorld2D(APP->mouse_previous, APP->camera_world));
                     World_Tile *world_tile_prev = GetWorldTile(pos_prev.tile_x, pos_prev.tile_y);
+                    bool has_left_previous_tile = world_tile_prev && (pos_prev.tile_x != pos.tile_x || pos_prev.tile_y != pos.tile_y);
 
-                    if (world_tile_prev && (pos_prev.tile_x != pos.tile_x || pos_prev.tile_y != pos.tile_y))
+                    if (has_left_previous_tile)
                     {
-                        uint32_t new_tile_idx = GetOrCreateTileFrom(&APP->edit_tile);
-                        world_tile_prev->index = new_tile_idx;
+                        world_tile_prev->index = GetOrCreateTileFrom(&APP->edit_tile);
                         CopyTile(&APP->edit_tile, GetTile(world_tile));
                     }
 
@@ -535,6 +544,10 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
                     tile = GetTile(world_tile);
                 }
                 SetTilePixel(tile, pos.pixel_x, pos.pixel_y, APP->current_color_idx);
+            }
+            else if (APP->auto_new_tile && IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
+            {
+                world_tile->index = GetOrCreateTileFrom(&APP->edit_tile);
             }
         }
     }
