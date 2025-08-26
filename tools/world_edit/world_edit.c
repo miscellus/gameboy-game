@@ -14,7 +14,7 @@
 #define COLOR_WINDOW_BACKGROUND ((Color){192, 192, 192, 255})
 #define COLOR_WORLD_BACKGROUND ((Color){170, 170, 170, 255})
 #define COLOR_TILESET_BACKGROUND ((Color){170, 170, 170, 255})
-
+#define COLOR_SOLID_BRUSH ((Color){160, 100, 20, 44})
 
 #define ZOOM_MIN 1.0f
 #define ZOOM_MAX 60.0f
@@ -82,10 +82,18 @@ typedef struct Tiles
     size_t capacity;
 } Tiles;
 
+typedef struct TilePtrs
+{
+    // Dynamic array of indexes
+    Tile **items;
+    size_t count;
+    size_t capacity;
+} TilePtrs;
+
 typedef struct World_Tile
 {
     uint32_t index;
-    bool solid;
+    bool is_solid;
 } World_Tile;
 
 typedef struct Level
@@ -114,15 +122,22 @@ typedef struct App
     Vector2 mouse_previous;
     uint8_t current_color_idx; // NOTE(jkk): In range 0-3
     uint32_t current_tile_idx;
+    bool current_is_solid;
 
     // Mode stuff
     Editor_Mode mode;
+    bool draw_solid_mask;
     bool hide_grid;
     bool show_tile_indexes;
     bool auto_new_tile;
+
+    bool is_auto_tiling;
+
     Level level;
     Tiles tile_set;
     Tile edit_tile; // The tile currently being drawn
+
+    Tile **sorted_tiles;
 } App;
 
 App *APP;
@@ -269,7 +284,7 @@ void InitApp(void)
 
     APP->side_panel_width_min = 300.0f;
     APP->side_panel_width = 200.0f;
-    APP->tile_picker_zoom = 2.25f;
+    APP->tile_picker_zoom = 4.0f;
 
     APP->level.width = 128;
     APP->level.height = 64;
@@ -294,6 +309,73 @@ Rectangle PadRectEx(Rectangle rect, float t, float r, float b, float l)
     return rect;
 }
 
+void DrawTileGrid(void)
+{
+    Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera_world);
+    Vector2 grid_end = GetWorldToScreen2D((Vector2){APP->level.width * 8.0f, APP->level.height * 8.0f}, APP->camera_world);
+
+    bool show_pixels = APP->camera_world.zoom > ZOOM_SHOW_PIXELS;
+
+    for (int y = 0; y < APP->level.height * 8; ++y)
+    {
+        float yf = grid_start.y + y * APP->camera_world.zoom;
+        Vector2 start_pos = {grid_start.x, yf};
+        Vector2 end_pos = {grid_end.x, yf};
+        bool on_tile_boundary = !(y & 0x7);
+        if (on_tile_boundary || show_pixels)
+        {
+            Color line_color = (Color){0, 0, 0, 48};
+            float line_width = 1.0f;
+            if (on_tile_boundary && show_pixels)
+            {
+                line_color.a = 60;
+                line_width = 3.0f;
+            }
+
+            DrawLineEx(start_pos, end_pos, line_width, line_color);
+        }
+    }
+
+    for (int x = 0; x < APP->level.width * 8; ++x)
+    {
+        float xf = grid_start.x + x * APP->camera_world.zoom;
+        Vector2 start_pos = {xf, grid_start.y};
+        Vector2 end_pos = {xf, grid_end.y};
+        bool on_tile_boundary = !(x & 0x7);
+        if (on_tile_boundary || show_pixels)
+        {
+            Color line_color = (Color){0, 0, 0, 48};
+            float line_width = 1.0f;
+            if (on_tile_boundary && show_pixels)
+            {
+                line_color.a = 60;
+                line_width = 3.0f;
+            }
+
+            DrawLineEx(start_pos, end_pos, line_width, line_color);
+        }
+    }
+}
+
+void DrawTileIndexes(void)
+{
+    Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera_world);
+
+    Font font = GetFontDefault();
+    for (int y = 0; y < APP->level.height; ++y)
+    {
+        float yf = grid_start.y + y * 8.0f * APP->camera_world.zoom;
+
+        for (int x = 0; x < APP->level.width; ++x)
+        {
+            float xf = grid_start.x + x * 8.0f * APP->camera_world.zoom;
+            int tile_index = APP->level.tiles[y * APP->level.width + x].index;
+            Vector2 pos = { xf + APP->camera_world.zoom * 0.2f, yf + APP->camera_world.zoom * 0.2f};
+            DrawTextEx(font, TextFormat("%d", tile_index), pos, 48, 1.0f, BLACK);
+        }
+    }
+}
+
 void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
 {
     Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, APP->camera_world);
@@ -309,8 +391,10 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
         {
             for (int x = 0; x < APP->level.width; ++x)
             {
-                Texture2D texture = APP->tile_set.items[APP->level.tiles[y * APP->level.width + x].index].texture;
+                World_Tile world_tile = APP->level.tiles[y * APP->level.width + x];
+                Texture2D texture = APP->tile_set.items[world_tile.index].texture;
                 DrawTexture(texture, x*8, y*8, WHITE);
+                if (world_tile.is_solid) DrawRectangleRec((Rectangle){(float)x*8,(float)y*8,8,8}, COLOR_SOLID_BRUSH);
             }
         }
 
@@ -322,94 +406,95 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
     }
     EndMode2D();
 
-    // Draw hovered pixel outline
-    if (APP->mode == MODE_DRAW_PIXELS && APP->camera_world.zoom > ZOOM_SHOW_PIXELS)
+    if (APP->mode == MODE_DRAW_PIXELS)
     {
-        Vector2 pixel_rect_min_world = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
-        Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, APP->camera_world);
+        // Draw hovered pixel outline
+        if (APP->camera_world.zoom > ZOOM_SHOW_PIXELS)
+        {
+            Vector2 pixel_rect_min_world = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
+            Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, APP->camera_world);
 
-        Color draw_color = palette_gbp[APP->current_color_idx];
-        Rectangle pixel_rect = {
-            .x = pixel_rect_min.x,
-            .y = pixel_rect_min.y,
-            .width = APP->camera_world.zoom,
-            .height = APP->camera_world.zoom,
-        };
-        DrawRectangleRec(pixel_rect, draw_color);
-        DrawRectangleLinesEx(pixel_rect, 3, BLACK);
+            Color draw_color = palette_gbp[APP->current_color_idx];
+            Rectangle pixel_rect = {
+                .x = pixel_rect_min.x,
+                .y = pixel_rect_min.y,
+                .width = APP->camera_world.zoom,
+                .height = APP->camera_world.zoom,
+            };
+            DrawRectangleRec(pixel_rect, draw_color);
+            DrawRectangleLinesEx(pixel_rect, 3, BLACK);
+        }
+    }
+    else if (APP->mode == MODE_DRAW_TILES)
+    {
+        Vector2 rect_min_world = (Vector2) {floorf(mouse_pos_world.x/8)*8, floorf(mouse_pos_world.y/8)*8};
+        Vector2 rect_min = GetWorldToScreen2D(rect_min_world, APP->camera_world);
+        Rectangle tile_rect = {rect_min.x, rect_min.y, 8*APP->camera_world.zoom, 8*APP->camera_world.zoom};
+
+        if (APP->draw_solid_mask)
+        {
+            if (APP->current_is_solid) DrawRectangleRec(tile_rect, COLOR_SOLID_BRUSH);
+            DrawRectangleLinesEx(tile_rect, 3, BLACK);
+        }
     }
 
-    // Draw tile grid
     if (!APP->hide_grid && APP->camera_world.zoom > ZOOM_SHOW_TILES)
     {
-        Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera_world);
-        Vector2 grid_end = GetWorldToScreen2D((Vector2){APP->level.width * 8.0f, APP->level.height * 8.0f}, APP->camera_world);
-
-        bool show_pixels = APP->camera_world.zoom > ZOOM_SHOW_PIXELS;
-
-        for (int y = 0; y < APP->level.height * 8; ++y)
-        {
-            float yf = grid_start.y + y * APP->camera_world.zoom;
-            Vector2 start_pos = {grid_start.x, yf};
-            Vector2 end_pos = {grid_end.x, yf};
-            bool on_tile_boundary = !(y & 0x7);
-            if (on_tile_boundary || show_pixels)
-            {
-                Color line_color = (Color){0, 0, 0, 48};
-                float line_width = 1.0f;
-                if (on_tile_boundary && show_pixels)
-                {
-                    line_color.a = 60;
-                    line_width = 3.0f;
-                }
-
-                DrawLineEx(start_pos, end_pos, line_width, line_color);
-            }
-        }
-
-        for (int x = 0; x < APP->level.width * 8; ++x)
-        {
-            float xf = grid_start.x + x * APP->camera_world.zoom;
-            Vector2 start_pos = {xf, grid_start.y};
-            Vector2 end_pos = {xf, grid_end.y};
-            bool on_tile_boundary = !(x & 0x7);
-            if (on_tile_boundary || show_pixels)
-            {
-                Color line_color = (Color){0, 0, 0, 48};
-                float line_width = 1.0f;
-                if (on_tile_boundary && show_pixels)
-                {
-                    line_color.a = 60;
-                    line_width = 3.0f;
-                }
-
-                DrawLineEx(start_pos, end_pos, line_width, line_color);
-            }
-        }
+        DrawTileGrid();
     }
 
-    // Draw tile indexes
     if (APP->show_tile_indexes && APP->camera_world.zoom > ZOOM_SHOW_TILE_INDEXES)
     {
-        Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera_world);
-
-        Font font = GetFontDefault();
-        for (int y = 0; y < APP->level.height; ++y)
-        {
-            float yf = grid_start.y + y * 8.0f * APP->camera_world.zoom;
-
-            for (int x = 0; x < APP->level.width; ++x)
-            {
-                float xf = grid_start.x + x * 8.0f * APP->camera_world.zoom;
-                int tile_index = APP->level.tiles[y * APP->level.width + x].index;
-                Vector2 pos = { xf + APP->camera_world.zoom * 0.2f, yf + APP->camera_world.zoom * 0.2f};
-                DrawTextEx(font, TextFormat("%d", tile_index), pos, 48, 1.0f, BLACK);
-            }
-        }
+        DrawTileIndexes();
     }
 
     EndScissorMode();
 }
+
+static inline bool TileEqualsGB(Tile_GB a, Tile_GB b)
+{
+    return a.u64s[0] == b.u64s[0] && a.u64s[1] == b.u64s[1];
+}
+
+static int CompareTiles(const Tile **pa, const Tile **pb)
+{
+    int sum_a = 0;
+    int sum_b = 0;
+
+    const uint8_t *colors_a = (*pa)->color_indexes;
+    const uint8_t *colors_b = (*pb)->color_indexes;
+
+    for (int y = 0; y < 8; ++y)
+    {
+        for (int x = 0; x < 8; ++x)
+        {
+            sum_a += colors_a[x + y*8];
+            sum_b += colors_b[x + y*8];
+        }
+    }
+
+    return sum_a - sum_b;
+}
+
+static int CompareTilesVoidPtr(const void *a, const void *b)
+{
+    return CompareTiles((const Tile **)a, (const Tile **)b);
+}
+
+void UpdateSortedTiles(void)
+{
+    if (APP->tile_set.count == 0) return;
+    APP->sorted_tiles = NOB_REALLOC(APP->sorted_tiles, APP->tile_set.count * sizeof(*APP->sorted_tiles));
+    NOB_ASSERT(APP->sorted_tiles != NULL && "Buy more RAM lol");
+
+    for (size_t i = 0; i < APP->tile_set.count; ++i)
+    {
+        APP->sorted_tiles[i] = &APP->tile_set.items[i];
+    }
+
+    qsort(APP->sorted_tiles, APP->tile_set.count, sizeof(*APP->sorted_tiles), CompareTilesVoidPtr);
+}
+
 
 void DrawSidePanel(Rectangle view)
 {
@@ -433,9 +518,17 @@ void DrawSidePanel(Rectangle view)
     float advance = tile_size + gap;
 
     // Draw tile set
+#if SORT_TILES
+    UpdateSortedTiles();
+#endif
+
     for (int i = 0; i < APP->tile_set.count; ++i)
     {
+#if SORT_TILES
+        Texture texture = APP->sorted_tiles[i]->texture;
+#else
         Texture texture = APP->tile_set.items[i].texture;
+#endif
 
         Vector2 pos =
         {
@@ -446,14 +539,9 @@ void DrawSidePanel(Rectangle view)
         // DrawTextureV(texture, pos, WHITE);
         DrawTexturePro(texture, (Rectangle){0,0,8,8}, (Rectangle){pos.x, pos.y, tile_size, tile_size}, (Vector2){0}, 0, WHITE);
     }
-    DrawText(TextFormat("%0.2f", tile_size), (int)(view.x + 20), (int)(view.y + 20), 50, RED);
+    // DrawText(TextFormat("%0.2f", tile_size), (int)(view.x + 20), (int)(view.y + 20), 50, RED);
 
     EndScissorMode();
-}
-
-static inline bool TileEqualsGB(Tile_GB a, Tile_GB b)
-{
-    return 0 == memcmp(&a, &b, sizeof(a));
 }
 
 void CopyTile(Tile *dst, Tile *src)
@@ -553,6 +641,17 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
     }
     else if (APP->mode == MODE_DRAW_TILES)
     {
+        if (IsKeyPressed(KEY_S))
+        {
+            APP->draw_solid_mask = !APP->draw_solid_mask;
+        }
+
+        if (APP->draw_solid_mask)
+        {
+            if (IsKeyPressed(KEY_ONE)) APP->current_is_solid = false;
+            if (IsKeyPressed(KEY_TWO)) APP->current_is_solid = true;
+        }
+
         if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
         {
             int change = -!!IsKeyPressed(KEY_UP) + !!IsKeyPressed(KEY_DOWN);
@@ -570,7 +669,14 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
             World_Tile *world_tile = GetWorldTile(pos.tile_x, pos.tile_y);
             if (world_tile)
             {
-                world_tile->index = APP->current_tile_idx;
+                if (APP->draw_solid_mask)
+                {
+                    world_tile->is_solid = APP->current_is_solid;
+                }
+                else
+                {
+                    world_tile->index = APP->current_tile_idx;
+                }
             }
         }
     }
