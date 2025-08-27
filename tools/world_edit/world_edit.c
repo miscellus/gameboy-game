@@ -398,7 +398,7 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
             }
         }
 
-        if (APP->auto_new_tile && IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+        if (APP->mode == MODE_DRAW_PIXELS && APP->auto_new_tile && IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
             World_Position edit_pos = GetWorldPosition(mouse_pos_world);
             DrawTexture(APP->edit_tile.texture, edit_pos.tile_x*8, edit_pos.tile_y*8, WHITE);
@@ -707,6 +707,21 @@ void UpdateSidePanelView(float scroll_input)
 
 }
 
+void DrawBrushPreview(Rectangle brush_preview_rect)
+{
+    if (APP->mode == MODE_DRAW_TILES)
+    {
+        Texture texture = APP->tile_set.items[APP->current_tile_idx].texture;
+        DrawTexturePro(texture, (Rectangle){0,0,8,8}, brush_preview_rect, (Vector2){0}, 0, WHITE);
+    }
+    else if (APP->mode == MODE_DRAW_PIXELS)
+    {
+        DrawRectangleRec(brush_preview_rect, palette_gbp[APP->current_color_idx]);
+    }
+
+    DrawRectangleLinesEx(brush_preview_rect, 3, BLACK);
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -754,6 +769,16 @@ int main(int argc, char **argv)
 
         DrawSidePanel(side_panel_view);
         DrawRectangleLinesEx(side_panel_view, 3, COLOR_PANEL_BORDER);
+
+        float brush_preview_size = 100.0f;
+        Rectangle brush_preview_rect =
+        {
+            world_view.x + 10,
+            world_view.y + world_view.height - brush_preview_size - 10,
+            brush_preview_size,
+            brush_preview_size,
+        };
+        DrawBrushPreview(brush_preview_rect);
 
         EndDrawing();
 
