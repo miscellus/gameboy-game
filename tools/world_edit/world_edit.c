@@ -72,6 +72,7 @@ typedef struct Tile
 {
     uint8_t color_indexes[8*8]; // NOTE(jkk): In range 0-3
     Texture2D texture;
+    uint32_t ref_count;
 } Tile;
 
 typedef struct Tiles
@@ -116,8 +117,8 @@ typedef struct App
 
     float side_panel_width;
     float side_panel_width_min;
-    float tile_picker_zoom;
-    float tile_picker_scroll_offset;
+    float side_panel_zoom;
+    float side_panel_scroll_offset;
 
     Vector2 mouse_previous;
     uint8_t current_color_idx; // NOTE(jkk): In range 0-3
@@ -261,15 +262,16 @@ World_Tile *GetWorldTile(uint32_t tile_x, uint32_t tile_y)
     return world_tile;
 }
 
-Tile *GetTile(World_Tile *world_tile)
+Tile *GetTile(uint32_t index)
 {
-    assert(world_tile->index < APP->tile_set.count);
-    return &APP->tile_set.items[world_tile->index];
+    assert(index < APP->tile_set.count);
+    return &APP->tile_set.items[index];
 }
 
 void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_index)
 {
     assert(pixel_x >= 0 && pixel_x < 8 && pixel_y >= 0 && pixel_y < 8);
+    assert(color_index < 4);
 
     tile->color_indexes[pixel_y * 8 + pixel_x] = color_index;
     Color pixel = palette_gbp[color_index];
@@ -278,19 +280,51 @@ void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_in
 
 void InitApp(void)
 {
-    APP = calloc(1, sizeof(*APP));
+    APP = malloc(sizeof(*APP));
+    memset(APP, 0xcd, sizeof(*APP));
+
+    APP->camera_world.offset = (Vector2){0};
+    APP->camera_world.target = (Vector2){0};
+    APP->camera_world.rotation = 0.0f;
     APP->camera_world.zoom = 5.0f;
     APP->mode = MODE_DRAW_PIXELS;
 
     APP->side_panel_width_min = 300.0f;
     APP->side_panel_width = 200.0f;
-    APP->tile_picker_zoom = 4.0f;
+    APP->side_panel_zoom = 4.0f;
+    APP->side_panel_scroll_offset = 0.0f;
+
+    APP->mouse_previous = (Vector2){0.0f};
+    APP->current_color_idx = 0; // NOTE(jkk): In range 0-3
+    APP->current_tile_idx = 0;
+    APP->current_is_solid = false;
+
+    APP->mode = MODE_DRAW_PIXELS;
+    APP->draw_solid_mask = false;
+    APP->hide_grid = false;
+    APP->show_tile_indexes = false;
+    APP->auto_new_tile = true;
+    APP->is_auto_tiling = true;
 
     APP->level.width = 128;
     APP->level.height = 64;
-    APP->level.tiles = calloc(APP->level.width * APP->level.height, sizeof(*APP->level.tiles));
+    size_t num_tiles = APP->level.width * APP->level.height;
+    APP->level.tiles = malloc(num_tiles*sizeof(*APP->level.tiles));
+    memset(APP->level.tiles, 0xcd, num_tiles*sizeof(*APP->level.tiles));
 
-    da_append(&APP->tile_set, CreateTile(COLOR_GB_LIGHT));
+    APP->tile_set.capacity = 0;
+    APP->tile_set.count = 0;
+    APP->tile_set.items = NULL;
+
+    for (size_t i = 0; i < num_tiles; ++i)
+    {
+        APP->level.tiles[i].index = 0;
+        APP->level.tiles[i].is_solid = 0;
+    }
+
+    Tile tile = CreateTile(COLOR_GB_LIGHT);
+    tile.ref_count = (uint32_t)num_tiles;
+    da_append(&APP->tile_set, tile);
 
     APP->edit_tile = CreateTile(COLOR_GB_MID_DARK);
 }
@@ -502,7 +536,7 @@ void DrawSidePanel(Rectangle view)
 
     ClearBackground(COLOR_TILESET_BACKGROUND);
 
-    float tile_size = APP->tile_picker_zoom * 8.0f;
+    float tile_size = APP->side_panel_zoom * 8.0f;
     if (tile_size > view.width)
     {
         tile_size = view.width;
@@ -525,19 +559,21 @@ void DrawSidePanel(Rectangle view)
     for (int i = 0; i < APP->tile_set.count; ++i)
     {
 #if SORT_TILES
-        Texture texture = APP->sorted_tiles[i]->texture;
+        Tile *tile = &APP->sorted_tiles[i];
 #else
-        Texture texture = APP->tile_set.items[i].texture;
+        Tile *tile = &APP->tile_set.items[i];
 #endif
+        Texture texture = tile->texture;
 
         Vector2 pos =
         {
             view.x + gap + (i%tiles_per_row) * advance,
             view.y + (i/tiles_per_row) * (tile_size + gap_min)
-                + APP->tile_picker_scroll_offset
+                + APP->side_panel_scroll_offset
         };
         // DrawTextureV(texture, pos, WHITE);
-        DrawTexturePro(texture, (Rectangle){0,0,8,8}, (Rectangle){pos.x, pos.y, tile_size, tile_size}, (Vector2){0}, 0, WHITE);
+        Color tint = tile->ref_count ? WHITE : (Color){255, 100, 100, 255};
+        DrawTexturePro(texture, (Rectangle){0,0,8,8}, (Rectangle){pos.x, pos.y, tile_size, tile_size}, (Vector2){0}, 0, tint);
     }
     // DrawText(TextFormat("%0.2f", tile_size), (int)(view.x + 20), (int)(view.y + 20), 50, RED);
 
@@ -556,7 +592,9 @@ void CopyTile(Tile *dst, Tile *src)
     UpdateTexture(dst->texture, pixels);
 }
 
-uint32_t GetOrCreateTileFrom(Tile *src_tile)
+#define INVALID_TILE_INDEX ((uint32_t)-1)
+
+uint32_t FindTileMatch(Tile *src_tile)
 {
     Tile_GB src_tile_gb = TileToGB(src_tile);
 
@@ -569,9 +607,40 @@ uint32_t GetOrCreateTileFrom(Tile *src_tile)
             return i;
         }
     }
+    return INVALID_TILE_INDEX;
+}
 
-    da_append(&APP->tile_set, CreateCloneTile(src_tile));
-    return (uint32_t)(APP->tile_set.count - 1);
+void UpdateWorldTileFromEditTile(World_Tile *world_tile)
+{
+    Tile *old_tile = GetTile(world_tile->index);
+    assert(old_tile->ref_count >= 1);
+
+    uint32_t index = FindTileMatch(&APP->edit_tile);
+
+    // No existing tile matches the edit tile
+    if (index == INVALID_TILE_INDEX)
+    {
+        // The old tile was only used here, just overwrite it and reuse the index
+        if (old_tile->ref_count == 1)
+        {
+            CopyTile(old_tile, &APP->edit_tile);
+            return;
+        }
+
+        index = (uint32_t)APP->tile_set.count;
+        Tile tile = CreateCloneTile(&APP->edit_tile);
+        da_append(&APP->tile_set, tile);
+    }
+
+    assert(index < APP->tile_set.count);
+
+    world_tile->index = index;
+    Tile *tile = GetTile(index);
+    tile->ref_count += 1; // Update reference count of new tile
+    assert(tile->ref_count < APP->level.width*APP->level.height);
+
+    old_tile->ref_count -= 1;
+    assert(old_tile->ref_count < APP->level.width*APP->level.height);
 }
 
 void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_scroll)
@@ -605,14 +674,15 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
 
         if (world_tile)
         {
+            Tile *tile = GetTile(world_tile->index);
+
             if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
             {
-                Tile *tile;
                 if (APP->auto_new_tile)
                 {
                     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
                     {
-                        CopyTile(&APP->edit_tile, GetTile(world_tile));
+                        CopyTile(&APP->edit_tile, tile);
                     }
 
                     World_Position pos_prev = GetWorldPosition(GetScreenToWorld2D(APP->mouse_previous, APP->camera_world));
@@ -621,21 +691,17 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
 
                     if (has_left_previous_tile)
                     {
-                        world_tile_prev->index = GetOrCreateTileFrom(&APP->edit_tile);
-                        CopyTile(&APP->edit_tile, GetTile(world_tile));
+                        UpdateWorldTileFromEditTile(world_tile_prev);
+                        CopyTile(&APP->edit_tile, tile);
                     }
 
                     tile = &APP->edit_tile;
-                }
-                else
-                {
-                    tile = GetTile(world_tile);
                 }
                 SetTilePixel(tile, pos.pixel_x, pos.pixel_y, APP->current_color_idx);
             }
             else if (APP->auto_new_tile && IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
             {
-                world_tile->index = GetOrCreateTileFrom(&APP->edit_tile);
+                UpdateWorldTileFromEditTile(world_tile);
             }
         }
     }
@@ -694,14 +760,14 @@ void UpdateSidePanelView(float scroll_input)
         if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
         {
             float zoom_factor = 0.1f * scroll_input;
-            APP->tile_picker_zoom += zoom_factor * APP->tile_picker_zoom;
-            APP->tile_picker_zoom = Clamp(APP->tile_picker_zoom, ZOOM_MIN_TILE_PICKER, ZOOM_MAX_TILE_PICKER);
+            APP->side_panel_zoom += zoom_factor * APP->side_panel_zoom;
+            APP->side_panel_zoom = Clamp(APP->side_panel_zoom, ZOOM_MIN_TILE_PICKER, ZOOM_MAX_TILE_PICKER);
         }
         else
         {
-            APP->tile_picker_scroll_offset += scroll_input * 8 * APP->tile_picker_zoom;
+            APP->side_panel_scroll_offset += scroll_input * 8 * APP->side_panel_zoom;
             // @hardcode
-            APP->tile_picker_scroll_offset = Clamp(APP->tile_picker_scroll_offset, -8 * 100 * APP->tile_picker_zoom, 0);
+            APP->side_panel_scroll_offset = Clamp(APP->side_panel_scroll_offset, -8 * 100 * APP->side_panel_zoom, 0);
         }
     }
 
@@ -720,6 +786,14 @@ void DrawBrushPreview(Rectangle brush_preview_rect)
     }
 
     DrawRectangleLinesEx(brush_preview_rect, 3, BLACK);
+}
+
+void GlobalShortcuts(void)
+{
+    if ((IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) && IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_F11))
+    {
+        ToggleFullscreen();
+    }
 }
 
 int main(int argc, char **argv)
@@ -746,6 +820,8 @@ int main(int argc, char **argv)
         Vector2 mouse_pos_screen = GetMousePosition();
         Vector2 mouse_delta = Vector2Subtract(mouse_pos_screen, APP->mouse_previous);
         float mouse_scroll = GetMouseWheelMoveV().y;
+
+        GlobalShortcuts();
 
         if (CheckCollisionPointRec(mouse_pos_screen, world_view))
             UpdateWorldView(mouse_pos_screen, mouse_delta, mouse_scroll);
