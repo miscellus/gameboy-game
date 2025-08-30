@@ -812,7 +812,13 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
                 }
                 else
                 {
+                    Tile *old_tile = GetTile(world_tile->index);
+                    --old_tile->ref_count;
+
                     world_tile->index = APP->current_tile_idx;
+
+                    Tile *new_tile = GetTile(world_tile->index);
+                    ++new_tile->ref_count;
                 }
             }
         }
