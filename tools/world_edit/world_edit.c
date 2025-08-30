@@ -79,8 +79,8 @@ typedef struct Tiles
 {
     // Dynamic array of tiles
     Tile *items;
-    size_t count;
-    size_t capacity;
+    uint32_t count;
+    uint32_t capacity;
 } Tiles;
 
 typedef struct TilePtrs
@@ -191,6 +191,11 @@ static Tile CreateCloneTile(Tile *src_tile)
     for (int i = 0; i < 8*8; ++i)
     {
         uint8_t color_index = src_tile->color_indexes[i];
+        if (!(color_index < 4))
+        {
+            fprintf(stderr, "color_index < 4: i = %d\n", i);
+            src_tile = src_tile;
+        }
         assert(color_index < 4);
         tile.color_indexes[i] = color_index;
         pixels[i] = palette_gbp[color_index];
@@ -529,13 +534,17 @@ void UpdateSortedTiles(void)
     qsort(APP->sorted_tiles, APP->tile_set.count, sizeof(*APP->sorted_tiles), CompareTilesVoidPtr);
 }
 
-
-void DrawSidePanel(Rectangle view)
+typedef struct
 {
-    BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
+    float tile_size;
+    float gap;
+    float gap_min;
+    uint32_t tiles_per_row;
+    uint32_t num_rows;
+} Tile_Picker_Props;
 
-    ClearBackground(COLOR_TILESET_BACKGROUND);
-
+Tile_Picker_Props GetTilePickerProps(Rectangle view)
+{
     float tile_size = APP->side_panel_zoom * 8.0f;
     if (tile_size > view.width)
     {
@@ -549,14 +558,83 @@ void DrawSidePanel(Rectangle view)
     float space_remaining = view.width - tiles_per_row * tile_size;
 
     float gap = space_remaining / (tiles_per_row - 1 + 2);
-    float advance = tile_size + gap;
+
+
+    Tile_Picker_Props p = {0};
+    p.tile_size = tile_size;
+    p.gap = gap;
+    p.gap_min = gap_min;
+    p.tiles_per_row = tiles_per_row;
+    p.num_rows = (APP->tile_set.count + tiles_per_row - 1) / tiles_per_row;
+    return p;
+}
+
+Rectangle GetSidePanelTileRect(Rectangle view, int tile_index, Tile_Picker_Props props)
+{
+    int tile_x = tile_index % props.tiles_per_row;
+    int tile_y = tile_index / props.tiles_per_row;
+    float advance_x = props.tile_size + props.gap;
+    float advance_y = props.tile_size + props.gap_min;
+
+    return (Rectangle){
+        view.x + props.gap + tile_x * advance_x,
+        view.y + props.gap_min + tile_y * advance_y + APP->side_panel_scroll_offset,
+        props.tile_size,
+        props.tile_size
+    };
+}
+
+int32_t SidePanelGetHoveredTileIndex(Rectangle view, Vector2 point)
+{
+    Tile_Picker_Props p = GetTilePickerProps(view);
+
+    //////////////
+    // X
+
+    // make point relative to scrollable region
+    float d = (point.x - p.gap - view.x) / (p.tile_size + p.gap);
+    if (d < 0) return -1;
+
+    // Return -1 if we are in the gap
+    if ((d - (int)d) > p.tile_size / (float)(p.tile_size + p.gap)) return -1;
+
+    if (d >= p.tiles_per_row) return -1;
+
+    uint32_t tile_x = (uint32_t)d;
+
+    //////////////
+    // Y
+
+    d = (point.y - p.gap_min - view.y - APP->side_panel_scroll_offset) / (p.tile_size + p.gap_min);
+    if (d < 0) return -1;
+
+    // Return -1 if we are in the gap
+    if ((d - (int)d) > p.tile_size / (float)(p.tile_size + p.gap_min)) return -1;
+
+    if (d > p.num_rows) return -1;
+
+    uint32_t tile_y = (uint32_t)d;
+
+    return tile_x + p.tiles_per_row * tile_y;
+}
+
+void DrawSidePanel(Rectangle view)
+{
+    BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
+
+    ClearBackground(COLOR_TILESET_BACKGROUND);
+
+    Tile_Picker_Props props = GetTilePickerProps(view);
 
     // Draw tile set
 #if SORT_TILES
     UpdateSortedTiles();
 #endif
 
-    for (int i = 0; i < APP->tile_set.count; ++i)
+    Vector2 mouse = GetMousePosition();
+    int32_t hovered_tile_index = SidePanelGetHoveredTileIndex(view, mouse);
+
+    for (int32_t i = 0; i < (int32_t)APP->tile_set.count; ++i)
     {
 #if SORT_TILES
         Tile *tile = &APP->sorted_tiles[i];
@@ -565,15 +643,18 @@ void DrawSidePanel(Rectangle view)
 #endif
         Texture texture = tile->texture;
 
-        Vector2 pos =
-        {
-            view.x + gap + (i%tiles_per_row) * advance,
-            view.y + (i/tiles_per_row) * (tile_size + gap_min)
-                + APP->side_panel_scroll_offset
-        };
+        Rectangle tile_rect = GetSidePanelTileRect(view, i, props);
+        // Vector2 pos =
+        // {
+        //     view.x + gap + (i%tiles_per_row) * advance,
+        //     view.y + (i/tiles_per_row) * (tile_size + gap_min)
+        //         + APP->side_panel_scroll_offset
+        //         + gap_min
+        // };
         // DrawTextureV(texture, pos, WHITE);
         Color tint = tile->ref_count ? WHITE : (Color){255, 100, 100, 255};
-        DrawTexturePro(texture, (Rectangle){0,0,8,8}, (Rectangle){pos.x, pos.y, tile_size, tile_size}, (Vector2){0}, 0, tint);
+        if (i == hovered_tile_index) tint = BLUE;
+        DrawTexturePro(texture, (Rectangle){0,0,8,8}, tile_rect, (Vector2){0}, 0, tint);
     }
     // DrawText(TextFormat("%0.2f", tile_size), (int)(view.x + 20), (int)(view.y + 20), 50, RED);
 
@@ -598,7 +679,7 @@ uint32_t FindTileMatch(Tile *src_tile)
 {
     Tile_GB src_tile_gb = TileToGB(src_tile);
 
-    for (int i = 0; i < APP->tile_set.count; ++i)
+    for (uint32_t i = 0; i < APP->tile_set.count; ++i)
     {
         Tile *tile = &APP->tile_set.items[i];
         Tile_GB tile_gb = TileToGB(tile);
