@@ -584,10 +584,8 @@ Rectangle GetSidePanelTileRect(Rectangle view, int tile_index, Tile_Picker_Props
     };
 }
 
-int32_t SidePanelGetHoveredTileIndex(Rectangle view, Vector2 point)
+int32_t SidePanelGetHoveredTileIndex(Rectangle view, Vector2 point, Tile_Picker_Props p)
 {
-    Tile_Picker_Props p = GetTilePickerProps(view);
-
     //////////////
     // X
 
@@ -632,7 +630,7 @@ void DrawSidePanel(Rectangle view)
 #endif
 
     Vector2 mouse = GetMousePosition();
-    int32_t hovered_tile_index = SidePanelGetHoveredTileIndex(view, mouse);
+    int32_t hovered_tile_index = SidePanelGetHoveredTileIndex(view, mouse, props);
 
     for (int32_t i = 0; i < (int32_t)APP->tile_set.count; ++i)
     {
@@ -853,7 +851,11 @@ void UpdateSidePanelView(Rectangle view, float scroll_input)
 
     if (click)
     {
-
+        int32_t tile_index = SidePanelGetHoveredTileIndex(view, GetMousePosition(), p);
+        if (tile_index >= 0)
+        {
+            APP->current_tile_idx = tile_index;
+        }
     }
 }
 
