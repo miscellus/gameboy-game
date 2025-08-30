@@ -644,14 +644,6 @@ void DrawSidePanel(Rectangle view)
         Texture texture = tile->texture;
 
         Rectangle tile_rect = GetSidePanelTileRect(view, i, props);
-        // Vector2 pos =
-        // {
-        //     view.x + gap + (i%tiles_per_row) * advance,
-        //     view.y + (i/tiles_per_row) * (tile_size + gap_min)
-        //         + APP->side_panel_scroll_offset
-        //         + gap_min
-        // };
-        // DrawTextureV(texture, pos, WHITE);
         Color tint = tile->ref_count ? WHITE : (Color){255, 100, 100, 255};
         if (i == hovered_tile_index) tint = BLUE;
         DrawTexturePro(texture, (Rectangle){0,0,8,8}, tile_rect, (Vector2){0}, 0, tint);
@@ -834,8 +826,14 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
 
 }
 
-void UpdateSidePanelView(float scroll_input)
+void UpdateSidePanelView(Rectangle view, float scroll_input)
 {
+    bool click = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+
+    if (!scroll_input && !click) return;
+
+    Tile_Picker_Props p = GetTilePickerProps(view);
+
     if (scroll_input)
     {
         if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
@@ -847,11 +845,16 @@ void UpdateSidePanelView(float scroll_input)
         else
         {
             APP->side_panel_scroll_offset += scroll_input * 8 * APP->side_panel_zoom;
-            // @hardcode
-            APP->side_panel_scroll_offset = Clamp(APP->side_panel_scroll_offset, -8 * 100 * APP->side_panel_zoom, 0);
         }
+
+        float height_not_in_view = (p.num_rows + 1) * (p.tile_size + p.gap_min) - view.height;
+        APP->side_panel_scroll_offset = Clamp(APP->side_panel_scroll_offset, -height_not_in_view, 0);
     }
 
+    if (click)
+    {
+
+    }
 }
 
 void DrawBrushPreview(Rectangle brush_preview_rect)
@@ -908,7 +911,7 @@ int main(int argc, char **argv)
             UpdateWorldView(mouse_pos_screen, mouse_delta, mouse_scroll);
 
         if (CheckCollisionPointRec(mouse_pos_screen, side_panel_view))
-            UpdateSidePanelView(mouse_scroll);
+            UpdateSidePanelView(side_panel_view, mouse_scroll);
 
         APP->mouse_previous = mouse_pos_screen;
 
