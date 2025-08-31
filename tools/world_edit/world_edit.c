@@ -657,6 +657,11 @@ void CopyTile(Tile *dst, Tile *src)
     for (int i = 0; i < 8*8; ++i)
     {
         uint8_t color_index = src->color_indexes[i];
+        if (color_index >= 4)
+        {
+            dst = dst;
+            assert(0 && "Color index is not in range 0-3");
+        }
         dst->color_indexes[i] = color_index;
         pixels[i] = palette_gbp[color_index];
     }
@@ -683,6 +688,9 @@ uint32_t FindTileMatch(Tile *src_tile)
 
 void UpdateWorldTileFromEditTile(World_Tile *world_tile)
 {
+    assert(world_tile >= APP->level.tiles && world_tile < &APP->level.tiles[APP->level.width*APP->level.height]);
+    assert(world_tile->index < APP->tile_set.count);
+
     Tile *old_tile = GetTile(world_tile->index);
     assert(old_tile->ref_count >= 1);
 
@@ -700,6 +708,7 @@ void UpdateWorldTileFromEditTile(World_Tile *world_tile)
 
         index = (uint32_t)APP->tile_set.count;
         Tile tile = CreateCloneTile(&APP->edit_tile);
+
         da_append(&APP->tile_set, tile);
     }
 
@@ -707,6 +716,7 @@ void UpdateWorldTileFromEditTile(World_Tile *world_tile)
 
     world_tile->index = index;
     Tile *tile = GetTile(index);
+    assert(tile->color_indexes[0] < 4);
     tile->ref_count += 1; // Update reference count of new tile
     assert(tile->ref_count < APP->level.width*APP->level.height);
 
@@ -763,6 +773,12 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
                     if (has_left_previous_tile)
                     {
                         UpdateWorldTileFromEditTile(world_tile_prev);
+
+                        // TODO make functions deal with only tile indicies
+                        // and NOT tile pointers, the tile pointers are not
+                        // stable!
+                        tile = GetTile(world_tile->index);
+
                         CopyTile(&APP->edit_tile, tile);
                     }
 
