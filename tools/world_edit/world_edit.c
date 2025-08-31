@@ -21,8 +21,8 @@
 #define ZOOM_SHOW_PIXELS 10.0f
 #define ZOOM_SHOW_TILES 2.5f
 #define ZOOM_SHOW_TILE_INDEXES 7.0f
-#define ZOOM_MAX_TILE_PICKER 10.0f
-#define ZOOM_MIN_TILE_PICKER 2.0f
+#define ZOOM_MAX_TILE_PICKER 15.0f
+#define ZOOM_MIN_TILE_PICKER 3.0f
 
 typedef enum Palette_Index
 {
@@ -736,10 +736,6 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
     if (IsKeyPressed(KEY_G))  APP->hide_grid = !APP->hide_grid;
     if (IsKeyPressed(KEY_I))  APP->show_tile_indexes = !APP->show_tile_indexes;
 
-    if (IsKeyPressed(KEY_TAB))
-    {
-        APP->mode = APP->mode == MODE_DRAW_PIXELS ? MODE_DRAW_TILES : MODE_DRAW_PIXELS;
-    }
 
     if (APP->mode == MODE_DRAW_PIXELS)
     {
@@ -747,8 +743,6 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
         if (IsKeyPressed(KEY_TWO)) APP->current_color_idx = COLOR_GB_MID_DARK;
         if (IsKeyPressed(KEY_THREE)) APP->current_color_idx = COLOR_GB_MID_LIGHT;
         if (IsKeyPressed(KEY_FOUR)) APP->current_color_idx = COLOR_GB_LIGHT;
-
-        if (IsKeyPressed(KEY_A)) APP->auto_new_tile = !APP->auto_new_tile;
 
         World_Position pos = GetWorldPosition(mouse_pos_world);
         World_Tile *world_tile = GetWorldTile(pos.tile_x, pos.tile_y);
@@ -794,11 +788,6 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
     }
     else if (APP->mode == MODE_DRAW_TILES)
     {
-        if (IsKeyPressed(KEY_S))
-        {
-            APP->draw_solid_mask = !APP->draw_solid_mask;
-        }
-
         if (APP->draw_solid_mask)
         {
             if (IsKeyPressed(KEY_ONE)) APP->current_is_solid = false;
@@ -881,19 +870,45 @@ void UpdateSidePanelView(Rectangle view, float scroll_input)
     }
 }
 
-void DrawBrushPreview(Rectangle brush_preview_rect)
+void DrawBrushPreview(Rectangle world_view)
 {
+    float size = 100.0f;
+    Rectangle rect =
+    {
+        world_view.x + 10,
+        world_view.y + world_view.height - size - 10,
+        size,
+        size,
+    };
+
+    const char *legend = NULL;
     if (APP->mode == MODE_DRAW_TILES)
     {
+        legend = "TILE";
+        if (APP->draw_solid_mask) legend = "TILE (SOLID)";
+
         Texture texture = APP->tile_set.items[APP->current_tile_idx].texture;
-        DrawTexturePro(texture, (Rectangle){0,0,8,8}, brush_preview_rect, (Vector2){0}, 0, WHITE);
+        DrawTexturePro(texture, (Rectangle){0,0,8,8}, rect, (Vector2){0}, 0, WHITE);
     }
     else if (APP->mode == MODE_DRAW_PIXELS)
     {
-        DrawRectangleRec(brush_preview_rect, palette_gbp[APP->current_color_idx]);
+        legend = "PIXEL";
+        if (APP->auto_new_tile) legend = "PIXEL (AUTO TILE)";
+        DrawRectangleRec(rect, palette_gbp[APP->current_color_idx]);
     }
 
-    DrawRectangleLinesEx(brush_preview_rect, 3, BLACK);
+    DrawRectangleLinesEx(rect, 3, BLACK);
+
+    Font font = GetFontDefault();
+    float font_size = 20.0f;
+    float spacing = 2.0f;
+    Vector2 text_dim = MeasureTextEx(font, legend, font_size, spacing);
+
+    Rectangle legend_rect = {rect.x + rect.width, rect.y + rect.height, text_dim.x + 10.0f, text_dim.y + 10.0f};
+    legend_rect.y -= legend_rect.height;
+    DrawRectangleRec(legend_rect, (Color){0,0,0,255});
+    Vector2 pos = {legend_rect.x + 5.0f, legend_rect.y + 5.0f};
+    DrawTextEx(font, legend, pos, font_size, spacing, WHITE);
 }
 
 void GlobalShortcuts(void)
@@ -901,6 +916,20 @@ void GlobalShortcuts(void)
     if ((IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) && IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_F11))
     {
         ToggleFullscreen();
+    }
+
+
+    if (IsKeyPressed(KEY_TAB))
+    {
+        if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
+        {
+            APP->draw_solid_mask ^= APP->mode == MODE_DRAW_TILES;
+            APP->auto_new_tile ^= APP->mode == MODE_DRAW_PIXELS;
+        }
+        else
+        {
+            APP->mode ^= MODE_DRAW_TILES ^ MODE_DRAW_PIXELS;
+        }
     }
 }
 
@@ -954,15 +983,7 @@ int main(int argc, char **argv)
         DrawSidePanel(side_panel_view);
         DrawRectangleLinesEx(side_panel_view, 3, COLOR_PANEL_BORDER);
 
-        float brush_preview_size = 100.0f;
-        Rectangle brush_preview_rect =
-        {
-            world_view.x + 10,
-            world_view.y + world_view.height - brush_preview_size - 10,
-            brush_preview_size,
-            brush_preview_size,
-        };
-        DrawBrushPreview(brush_preview_rect);
+        DrawBrushPreview(world_view);
 
         EndDrawing();
 
