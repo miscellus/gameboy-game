@@ -10,6 +10,11 @@
 #define NOB_STRIP_PREFIX
 #include "../../nob.h"
 
+#include "tinyfiledialogs.h"
+
+// OPTIONS
+//#define SORT_TILES
+
 #define COLOR_PANEL_BORDER ((Color){160, 160, 160, 255})
 #define COLOR_WINDOW_BACKGROUND ((Color){192, 192, 192, 255})
 #define COLOR_WORLD_BACKGROUND ((Color){170, 170, 170, 255})
@@ -332,6 +337,8 @@ void InitApp(void)
     da_append(&APP->tile_set, tile);
 
     APP->edit_tile = CreateTile(COLOR_GB_MID_DARK);
+
+    APP->sorted_tiles = NULL;
 }
 
 Rectangle CutRectGetTop(Rectangle r, float s) { r.height = s; return r; }
@@ -625,7 +632,7 @@ void DrawSidePanel(Rectangle view)
     Tile_Picker_Props props = GetTilePickerProps(view);
 
     // Draw tile set
-#if SORT_TILES
+#ifdef SORT_TILES
     UpdateSortedTiles();
 #endif
 
@@ -634,8 +641,8 @@ void DrawSidePanel(Rectangle view)
 
     for (int32_t i = 0; i < (int32_t)APP->tile_set.count; ++i)
     {
-#if SORT_TILES
-        Tile *tile = &APP->sorted_tiles[i];
+#ifdef SORT_TILES
+        Tile *tile = APP->sorted_tiles[i];
 #else
         Tile *tile = &APP->tile_set.items[i];
 #endif
@@ -913,7 +920,11 @@ void DrawBrushPreview(Rectangle world_view)
 
 void GlobalShortcuts(void)
 {
-    if ((IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) && IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_F11))
+    bool modifier_alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
+    bool modifier_ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    bool modifier_shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+
+    if (modifier_alt && IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_F11))
     {
         ToggleFullscreen();
     }
@@ -921,7 +932,7 @@ void GlobalShortcuts(void)
 
     if (IsKeyPressed(KEY_TAB))
     {
-        if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
+        if (modifier_shift)
         {
             APP->draw_solid_mask ^= APP->mode == MODE_DRAW_TILES;
             APP->auto_new_tile ^= APP->mode == MODE_DRAW_PIXELS;
@@ -930,6 +941,58 @@ void GlobalShortcuts(void)
         {
             APP->mode ^= MODE_DRAW_TILES ^ MODE_DRAW_PIXELS;
         }
+    }
+
+    if (IsKeyPressed(KEY_F1))
+    {
+        // int tinyfd_messageBox(
+        // char const * aTitle, /* NULL or "" */
+        // char const * aMessage, /* NULL or ""  may contain \n and \t */
+        // char const * aDialogType, /* "ok" "okcancel" "yesno" "yesnocancel" */
+        // char const * aIconType, /* "info" "warning" "error" "question" */
+        // int aDefaultButton) /* 0 for cancel/no , 1 for ok/yes , 2 for no in yesnocancel */
+
+        tinyfd_messageBox("Title", "Message", "ok", "info", 1);
+    }
+
+    if (modifier_ctrl && IsKeyPressed(KEY_S))
+    {
+#if 0
+        char const * aTitle , /* NULL or "" */
+        char const * aDefaultPathAndOrFile , /* NULL or "" */
+        int aNumOfFilterPatterns , /* 0 */
+        char const * const * aFilterPatterns , /* NULL or {"*.jpg","*.png"} */
+        char const * aSingleFilterDescription ) /* NULL or "image files" */
+
+#endif
+
+        const char *pattern = "*.wld";
+        tinyfd_saveFileDialog(
+            "Save World",
+            NULL,
+            1,
+            &pattern,
+            NULL);
+    }
+
+    if (modifier_ctrl && IsKeyPressed(KEY_O))
+    {
+        #if 0
+        char const * aTitle
+        char const * aDefaultPathAndOrFile
+        int aNumOfFilterPatterns
+        char const * const * aFilterPatterns
+        char const * aSingleFilterDescription
+        int aAllowMultipleSelects
+        #endif
+
+        char * tinyfd_openFileDialog(
+        , /* NULL or "" */
+        , /* NULL or "" */
+        , /* 0 */
+        , /* NULL or {"*.jpg","*.png"} */
+        , /* NULL or "image files" */
+        ) /* 0 or 1 */
     }
 }
 
