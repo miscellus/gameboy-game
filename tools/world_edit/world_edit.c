@@ -144,6 +144,11 @@ typedef struct App
     Tile edit_tile; // The tile currently being drawn
 
     Tile **sorted_tiles;
+
+    const char *currently_open_world_file_path;
+    FILE *currently_open_world_file;
+
+    uint16_t save_file_format_version;
 } App;
 
 App *APP;
@@ -339,6 +344,11 @@ void InitApp(void)
     APP->edit_tile = CreateTile(COLOR_GB_MID_DARK);
 
     APP->sorted_tiles = NULL;
+
+    APP->currently_open_world_file_path = NULL;
+    APP->currently_open_world_file = NULL;
+
+    APP->save_file_format_version = 0;
 }
 
 Rectangle CutRectGetTop(Rectangle r, float s) { r.height = s; return r; }
@@ -918,6 +928,169 @@ void DrawBrushPreview(Rectangle world_view)
     DrawTextEx(font, legend, pos, font_size, spacing, WHITE);
 }
 
+typedef struct
+{
+    uint8_t *items;
+    uint32_t count;
+    uint32_t capacity;
+} Bytes;
+
+void BytesWriteU32(Bytes *b, uint32_t v)
+{
+    da_append(b, (uint8_t)(v >>  0));
+    da_append(b, (uint8_t)(v >>  8));
+    da_append(b, (uint8_t)(v >> 16));
+    da_append(b, (uint8_t)(v >> 24));
+}
+
+void BytesWriteU16(Bytes *b, uint16_t v)
+{
+    da_append(b, (uint8_t)(v >> 0));
+    da_append(b, (uint8_t)(v >> 8));
+}
+
+#define BytesWriteChunkId(b, s) do \
+{ \
+    da_append(b, (s)[0]); \
+    da_append(b, (s)[1]); \
+    da_append(b, (s)[2]); \
+    da_append(b, (s)[3]); \
+} while(0)
+
+void BytesWriteTileGb(Bytes *b, Tile_GB tile)
+{
+    for (uint32_t i = 0; i < 8; ++i)
+    {
+        da_append(b, tile.lines[i].bit_planes[0]);
+        da_append(b, tile.lines[i].bit_planes[1]);
+    }
+}
+
+void BytesWriteTileSet(Bytes *b, Tiles tile_set)
+{
+    BytesWriteChunkId(b, "TLST");
+
+    uint32_t chunk_len_loc = b->count;
+    BytesWriteU32(b, 0); // Replace later with actual chunk length
+
+    assert(tile_set.count <= 65535);
+    BytesWriteU16(b, (uint16_t)tile_set.count);
+
+    for (uint32_t i = 0; i < tile_set.count; ++i)
+    {
+        Tile_GB tile_gb = TileToGB(&tile_set.items[i]);
+        BytesWriteTileGb(b, tile_gb);
+    }
+
+    // Backfill chunk length field
+    *(uint32_t *)&b->items[chunk_len_loc] = b->count - chunk_len_loc;
+}
+
+void BytesWriteLevel(Bytes *b, Level level, uint16_t tile_set_index)
+{
+    BytesWriteChunkId(b, "LEVL");
+
+    uint32_t chunk_len_loc = b->count;
+    BytesWriteU32(b, 0); // Replace later with actual chunk length
+
+    assert(level.width <= 65536);
+    BytesWriteU16(b, (uint16_t)level.width);
+
+    assert(level.height <= 65536);
+    BytesWriteU16(b, (uint16_t)level.height);
+
+    BytesWriteU16(b, tile_set_index);
+
+    da_reserve(b, b->count + level.width*level.height * sizeof(uint16_t));
+
+    for (uint32_t i = 0; i < level.width*level.height; ++i)
+    {
+        assert(level.tiles[i].index < 65536);
+        BytesWriteU16(b, (uint16_t)level.tiles[i].index);
+    }
+
+    assert(level.width*level.height % 8 == 0);
+
+    da_reserve(b, b->count + level.width*level.height);
+    for (uint32_t i = 0; i < level.width*level.height; i += 8)
+    {
+        uint8_t solid_bits =
+            !!level.tiles[i + 0].is_solid << 7 |
+            !!level.tiles[i + 1].is_solid << 6 |
+            !!level.tiles[i + 2].is_solid << 5 |
+            !!level.tiles[i + 3].is_solid << 4 |
+            !!level.tiles[i + 4].is_solid << 3 |
+            !!level.tiles[i + 5].is_solid << 2 |
+            !!level.tiles[i + 6].is_solid << 1 |
+            !!level.tiles[i + 7].is_solid << 0;
+
+        da_append(b, solid_bits);
+    }
+
+    // Backfill chunk length field
+    *(uint32_t *)&b->items[chunk_len_loc] = b->count - chunk_len_loc;
+}
+
+void BytesWriteWorld(Bytes *b)
+{
+    // File format header
+    BytesWriteChunkId(b, "\xffWLD");
+    BytesWriteU16(b, APP->save_file_format_version);
+
+    // Write tile sets
+    // TODO support more than one tile set
+    BytesWriteTileSet(b, APP->tile_set);
+
+    // Write levels
+    // TODO support more than one level
+    BytesWriteLevel(b, APP->level, 0);
+}
+
+void SaveWorld(bool save_as)
+{
+    const char *world_file_pattern = "*.wld";
+
+    if (save_as || !APP->currently_open_world_file)
+    {
+        char *save_file_path = tinyfd_saveFileDialog("Save World", NULL, 1, &world_file_pattern, NULL);
+        bool allowed_to_save =
+        save_file_path != NULL
+        && save_file_path[0]
+        && (!file_exists(save_file_path)
+            || tinyfd_messageBox("Alert!", "Are you sure you want to overwrite the existing world?", "yesno", "question", 0));
+
+        if (!allowed_to_save) return;
+        FILE *file = fopen(save_file_path, "wb");
+        if (!file)
+        {
+            size_t tmp = temp_save();
+            char *message = temp_sprintf("Could not open %.100s for writing", save_file_path);
+            tinyfd_messageBox("Could not open file for saving", message, "ok", "warning", 1);
+            temp_rewind(tmp);
+            return;
+        }
+
+        if (APP->currently_open_world_file) fclose(APP->currently_open_world_file);
+        APP->currently_open_world_file_path = save_file_path;
+        APP->currently_open_world_file = file;
+    }
+
+    nob_log(INFO, "Saved world.");
+    Bytes buffer = {0};
+    BytesWriteWorld(&buffer);
+
+    // Write the buffer to the file
+    size_t written = fwrite(buffer.items, sizeof(uint8_t), buffer.count, APP->currently_open_world_file);
+    free(buffer.items);
+
+    if (written != buffer.count)
+    {
+        tinyfd_messageBox("Could not write to file", "Could not write to file", "ok", "warning", 1);
+        perror("Error writing to file");
+        fclose(APP->currently_open_world_file);
+    }
+}
+
 void GlobalShortcuts(void)
 {
     bool modifier_alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
@@ -955,6 +1128,8 @@ void GlobalShortcuts(void)
         tinyfd_messageBox("Title", "Message", "ok", "info", 1);
     }
 
+    const char *world_file_pattern = "*.wld";
+
     if (modifier_ctrl && IsKeyPressed(KEY_S))
     {
 #if 0
@@ -966,13 +1141,7 @@ void GlobalShortcuts(void)
 
 #endif
 
-        const char *pattern = "*.wld";
-        tinyfd_saveFileDialog(
-            "Save World",
-            NULL,
-            1,
-            &pattern,
-            NULL);
+        SaveWorld(modifier_shift);
     }
 
     if (modifier_ctrl && IsKeyPressed(KEY_O))
@@ -986,13 +1155,7 @@ void GlobalShortcuts(void)
         int aAllowMultipleSelects
         #endif
 
-        char * tinyfd_openFileDialog(
-        , /* NULL or "" */
-        , /* NULL or "" */
-        , /* 0 */
-        , /* NULL or {"*.jpg","*.png"} */
-        , /* NULL or "image files" */
-        ) /* 0 or 1 */
+        char *open_file_path = tinyfd_openFileDialog("Open World", NULL, 1, &world_file_pattern, NULL, 0);
     }
 }
 
