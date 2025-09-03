@@ -1,3 +1,8 @@
+//
+// TODO: Add proper licenses and credit for used libs
+//
+
+
 #include <assert.h>
 #include <stdio.h>
 #include <raylib.h>
@@ -46,6 +51,13 @@ static Color palette_gbp[] =
     [COLOR_GB_LIGHT] = {173, 191, 146, 255},
     [COLOR_GB_OFF] = {194, 207, 168, 255},
 };
+
+typedef struct
+{
+    uint8_t *items;
+    uint32_t count;
+    uint32_t capacity;
+} Bytes;
 
 typedef struct World_Position
 {
@@ -147,8 +159,8 @@ typedef struct App
 
     const char *currently_open_world_file_path;
     FILE *currently_open_world_file;
-
     uint16_t save_file_format_version;
+    Bytes serialization_buffer;
 } App;
 
 App *APP;
@@ -347,8 +359,8 @@ void InitApp(void)
 
     APP->currently_open_world_file_path = NULL;
     APP->currently_open_world_file = NULL;
-
     APP->save_file_format_version = 0;
+    APP->serialization_buffer = (Bytes){0};
 }
 
 Rectangle CutRectGetTop(Rectangle r, float s) { r.height = s; return r; }
@@ -928,13 +940,6 @@ void DrawBrushPreview(Rectangle world_view)
     DrawTextEx(font, legend, pos, font_size, spacing, WHITE);
 }
 
-typedef struct
-{
-    uint8_t *items;
-    uint32_t count;
-    uint32_t capacity;
-} Bytes;
-
 void BytesWriteU32(Bytes *b, uint32_t v)
 {
     da_append(b, (uint8_t)(v >>  0));
@@ -1046,20 +1051,17 @@ void BytesWriteWorld(Bytes *b)
     BytesWriteLevel(b, APP->level, 0);
 }
 
+static const char *world_file_pattern = "*.wld";
+
 void SaveWorld(bool save_as)
 {
-    const char *world_file_pattern = "*.wld";
-
     if (save_as || !APP->currently_open_world_file)
     {
         char *save_file_path = tinyfd_saveFileDialog("Save World", NULL, 1, &world_file_pattern, NULL);
-        bool allowed_to_save =
-        save_file_path != NULL
-        && save_file_path[0]
-        && (!file_exists(save_file_path)
-            || tinyfd_messageBox("Alert!", "Are you sure you want to overwrite the existing world?", "yesno", "question", 0));
+        bool allowed_to_save = save_file_path != NULL && save_file_path[0] && !file_exists(save_file_path);
 
         if (!allowed_to_save) return;
+
         FILE *file = fopen(save_file_path, "wb");
         if (!file)
         {
@@ -1075,20 +1077,84 @@ void SaveWorld(bool save_as)
         APP->currently_open_world_file = file;
     }
 
-    nob_log(INFO, "Saved world.");
-    Bytes buffer = {0};
-    BytesWriteWorld(&buffer);
+    BytesWriteWorld(&APP->serialization_buffer);
 
     // Write the buffer to the file
-    size_t written = fwrite(buffer.items, sizeof(uint8_t), buffer.count, APP->currently_open_world_file);
-    free(buffer.items);
+    size_t written = fwrite(APP->serialization_buffer.items, sizeof(uint8_t), APP->serialization_buffer.count, APP->currently_open_world_file);
+    APP->serialization_buffer.count = 0;
 
-    if (written != buffer.count)
+    if (written != APP->serialization_buffer.count)
     {
         tinyfd_messageBox("Could not write to file", "Could not write to file", "ok", "warning", 1);
         perror("Error writing to file");
         fclose(APP->currently_open_world_file);
     }
+    else
+    {
+        nob_log(INFO, "Saved world.");
+    }
+}
+
+bool BytesReadFile(Bytes *b, FILE *f)
+{
+    if (fseek(f, 0, SEEK_END) < 0) return false;
+
+#ifndef _WIN32
+    uint32_t file_size = (uint32_t)ftell(f);
+#else
+    uint32_t file_size = (uint32_t)_ftelli64(f);
+#endif
+
+    if (file_size < 0) return false;
+    if (fseek(f, 0, SEEK_SET) < 0) return false;
+
+    uint32_t new_count = b->count + file_size;
+    da_reserve(b, new_count);
+
+    fread(b->items + b->count, file_size, 1, f);
+    if (ferror(f)) return false;
+
+    b->count = new_count;
+
+    return true;
+}
+
+bool LoadWorld(void)
+{
+    char *load_file_path = tinyfd_openFileDialog("Load World", NULL, 1, &world_file_pattern, NULL, 0);
+
+    bool can_load = load_file_path != NULL && load_file_path[0] && file_exists(load_file_path);
+
+    if (!can_load) return false;
+
+    FILE *file = fopen(load_file_path, "rb+");
+    if (!file)
+    {
+        goto error;
+    }
+
+    if (APP->currently_open_world_file) fclose(APP->currently_open_world_file);
+
+    APP->serialization_buffer.count = 0;
+    if (!BytesReadFile(&APP->serialization_buffer, file))
+    {
+        goto error;
+    }
+
+    APP->currently_open_world_file_path = load_file_path;
+    APP->currently_open_world_file = file;
+
+    return true;
+
+error:
+    if (file) fclose(file);
+    size_t tmp = temp_save();
+    char *message = temp_sprintf("Could not open world file, %.100s", load_file_path);
+    tinyfd_messageBox("Could not open world file", message, "ok", "warning", 1);
+    temp_rewind(tmp);
+    APP->serialization_buffer.count = 0;
+
+    return false;
 }
 
 void GlobalShortcuts(void)
@@ -1118,45 +1184,11 @@ void GlobalShortcuts(void)
 
     if (IsKeyPressed(KEY_F1))
     {
-        // int tinyfd_messageBox(
-        // char const * aTitle, /* NULL or "" */
-        // char const * aMessage, /* NULL or ""  may contain \n and \t */
-        // char const * aDialogType, /* "ok" "okcancel" "yesno" "yesnocancel" */
-        // char const * aIconType, /* "info" "warning" "error" "question" */
-        // int aDefaultButton) /* 0 for cancel/no , 1 for ok/yes , 2 for no in yesnocancel */
-
         tinyfd_messageBox("Title", "Message", "ok", "info", 1);
     }
 
-    const char *world_file_pattern = "*.wld";
-
-    if (modifier_ctrl && IsKeyPressed(KEY_S))
-    {
-#if 0
-        char const * aTitle , /* NULL or "" */
-        char const * aDefaultPathAndOrFile , /* NULL or "" */
-        int aNumOfFilterPatterns , /* 0 */
-        char const * const * aFilterPatterns , /* NULL or {"*.jpg","*.png"} */
-        char const * aSingleFilterDescription ) /* NULL or "image files" */
-
-#endif
-
-        SaveWorld(modifier_shift);
-    }
-
-    if (modifier_ctrl && IsKeyPressed(KEY_O))
-    {
-        #if 0
-        char const * aTitle
-        char const * aDefaultPathAndOrFile
-        int aNumOfFilterPatterns
-        char const * const * aFilterPatterns
-        char const * aSingleFilterDescription
-        int aAllowMultipleSelects
-        #endif
-
-        char *open_file_path = tinyfd_openFileDialog("Open World", NULL, 1, &world_file_pattern, NULL, 0);
-    }
+    if (modifier_ctrl && IsKeyPressed(KEY_S)) SaveWorld(modifier_shift);
+    if (modifier_ctrl && IsKeyPressed(KEY_O)) LoadWorld();
 }
 
 int main(int argc, char **argv)
