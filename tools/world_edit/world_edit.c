@@ -92,13 +92,13 @@ typedef struct Tile
     uint32_t ref_count;
 } Tile;
 
-typedef struct Tiles
+typedef struct Tile_Set
 {
     // Dynamic array of tiles
     Tile *items;
     uint32_t count;
     uint32_t capacity;
-} Tiles;
+} Tile_Set;
 
 typedef struct TilePtrs
 {
@@ -108,18 +108,25 @@ typedef struct TilePtrs
     size_t capacity;
 } TilePtrs;
 
-typedef struct World_Tile
+typedef struct Level_Tile
 {
     uint32_t index;
     bool is_solid;
-} World_Tile;
+} Level_Tile;
 
 typedef struct Level
 {
-    World_Tile *tiles;
+    Level_Tile *tiles;
     size_t width;
     size_t height;
+    size_t tile_set_index;
 } Level;
+
+typedef struct World
+{
+    Level level;
+    Tile_Set tile_set;
+} World;
 
 typedef enum Editor_Mode
 {
@@ -151,8 +158,8 @@ typedef struct App
 
     bool is_auto_tiling;
 
-    Level level;
-    Tiles tile_set;
+    World world;
+
     Tile edit_tile; // The tile currently being drawn
 
     Tile **sorted_tiles;
@@ -276,23 +283,22 @@ World_Position GetWorldPosition(Vector2 point)
     return result;
 }
 
-World_Tile *GetWorldTile(uint32_t tile_x, uint32_t tile_y)
+Level_Tile *LevelGetTile(Level level, uint32_t tile_x, uint32_t tile_y)
 {
-    Level *level = &APP->level;
-    World_Tile *world_tile = NULL;
-    if (tile_x >= 0 && tile_x < level->width &&
-        tile_y >= 0 && tile_y < level->height)
+    Level_Tile *level_tile = NULL;
+    if (tile_x >= 0 && tile_x < level.width &&
+        tile_y >= 0 && tile_y < level.height)
     {
-        world_tile = &level->tiles[tile_y * level->width + tile_x];
+        level_tile = &level.tiles[tile_y * level.width + tile_x];
     }
 
-    return world_tile;
+    return level_tile;
 }
 
-Tile *GetTile(uint32_t index)
+Tile *GetTile(Tile_Set tile_set, uint32_t index)
 {
-    assert(index < APP->tile_set.count);
-    return &APP->tile_set.items[index];
+    assert(index < tile_set.count);
+    return &tile_set.items[index];
 }
 
 void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_index)
@@ -333,25 +339,25 @@ void InitApp(void)
     APP->auto_new_tile = true;
     APP->is_auto_tiling = true;
 
-    APP->level.width = 128;
-    APP->level.height = 64;
-    size_t num_tiles = APP->level.width * APP->level.height;
-    APP->level.tiles = malloc(num_tiles*sizeof(*APP->level.tiles));
-    memset(APP->level.tiles, 0xcd, num_tiles*sizeof(*APP->level.tiles));
+    APP->world.level.width = 128;
+    APP->world.level.height = 64;
+    size_t num_tiles = APP->world.level.width * APP->world.level.height;
+    APP->world.level.tiles = malloc(num_tiles*sizeof(*APP->world.level.tiles));
+    memset(APP->world.level.tiles, 0xcd, num_tiles*sizeof(*APP->world.level.tiles));
 
-    APP->tile_set.capacity = 0;
-    APP->tile_set.count = 0;
-    APP->tile_set.items = NULL;
+    APP->world.tile_set.capacity = 0;
+    APP->world.tile_set.count = 0;
+    APP->world.tile_set.items = NULL;
 
     for (size_t i = 0; i < num_tiles; ++i)
     {
-        APP->level.tiles[i].index = 0;
-        APP->level.tiles[i].is_solid = 0;
+        APP->world.level.tiles[i].index = 0;
+        APP->world.level.tiles[i].is_solid = 0;
     }
 
     Tile tile = CreateTile(COLOR_GB_LIGHT);
     tile.ref_count = (uint32_t)num_tiles;
-    da_append(&APP->tile_set, tile);
+    da_append(&APP->world.tile_set, tile);
 
     APP->edit_tile = CreateTile(COLOR_GB_MID_DARK);
 
@@ -377,14 +383,14 @@ Rectangle PadRectEx(Rectangle rect, float t, float r, float b, float l)
     return rect;
 }
 
-void DrawTileGrid(void)
+void DrawTileGrid(Level level)
 {
     Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera_world);
-    Vector2 grid_end = GetWorldToScreen2D((Vector2){APP->level.width * 8.0f, APP->level.height * 8.0f}, APP->camera_world);
+    Vector2 grid_end = GetWorldToScreen2D((Vector2){level.width * 8.0f, level.height * 8.0f}, APP->camera_world);
 
     bool show_pixels = APP->camera_world.zoom > ZOOM_SHOW_PIXELS;
 
-    for (int y = 0; y < APP->level.height * 8; ++y)
+    for (int y = 0; y < level.height * 8; ++y)
     {
         float yf = grid_start.y + y * APP->camera_world.zoom;
         Vector2 start_pos = {grid_start.x, yf};
@@ -404,7 +410,7 @@ void DrawTileGrid(void)
         }
     }
 
-    for (int x = 0; x < APP->level.width * 8; ++x)
+    for (int x = 0; x < level.width * 8; ++x)
     {
         float xf = grid_start.x + x * APP->camera_world.zoom;
         Vector2 start_pos = {xf, grid_start.y};
@@ -425,27 +431,30 @@ void DrawTileGrid(void)
     }
 }
 
-void DrawTileIndexes(void)
+void DrawTileIndexes(Level level)
 {
     Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera_world);
 
     Font font = GetFontDefault();
-    for (int y = 0; y < APP->level.height; ++y)
+    for (int y = 0; y < level.height; ++y)
     {
         float yf = grid_start.y + y * 8.0f * APP->camera_world.zoom;
 
-        for (int x = 0; x < APP->level.width; ++x)
+        for (int x = 0; x < level.width; ++x)
         {
             float xf = grid_start.x + x * 8.0f * APP->camera_world.zoom;
-            int tile_index = APP->level.tiles[y * APP->level.width + x].index;
+            int tile_index = level.tiles[y * level.width + x].index;
             Vector2 pos = { xf + APP->camera_world.zoom * 0.2f, yf + APP->camera_world.zoom * 0.2f};
             DrawTextEx(font, TextFormat("%d", tile_index), pos, 48, 1.0f, BLACK);
         }
     }
 }
 
-void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
+void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
 {
+    Level level = world.level;
+    Tile_Set tile_set = world.tile_set;
+
     Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, APP->camera_world);
     BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
     ClearBackground(COLOR_WORLD_BACKGROUND);
@@ -455,14 +464,14 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
     BeginMode2D(APP->camera_world);
     {
 
-        for (int y = 0; y < APP->level.height; ++y)
+        for (int y = 0; y < level.height; ++y)
         {
-            for (int x = 0; x < APP->level.width; ++x)
+            for (int x = 0; x < level.width; ++x)
             {
-                World_Tile world_tile = APP->level.tiles[y * APP->level.width + x];
-                Texture2D texture = APP->tile_set.items[world_tile.index].texture;
+                Level_Tile level_tile = level.tiles[y * level.width + x];
+                Texture2D texture = tile_set.items[level_tile.index].texture;
                 DrawTexture(texture, x*8, y*8, WHITE);
-                if (world_tile.is_solid) DrawRectangleRec((Rectangle){(float)x*8,(float)y*8,8,8}, COLOR_SOLID_BRUSH);
+                if (level_tile.is_solid) DrawRectangleRec((Rectangle){(float)x*8,(float)y*8,8,8}, COLOR_SOLID_BRUSH);
             }
         }
 
@@ -508,12 +517,12 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
 
     if (!APP->hide_grid && APP->camera_world.zoom > ZOOM_SHOW_TILES)
     {
-        DrawTileGrid();
+        DrawTileGrid(APP->world.level);
     }
 
     if (APP->show_tile_indexes && APP->camera_world.zoom > ZOOM_SHOW_TILE_INDEXES)
     {
-        DrawTileIndexes();
+        DrawTileIndexes(APP->world.level);
     }
 
     EndScissorMode();
@@ -522,45 +531,6 @@ void DrawWorldView(Rectangle view, Vector2 mouse_pos_screen)
 static inline bool TileEqualsGB(Tile_GB a, Tile_GB b)
 {
     return a.u64s[0] == b.u64s[0] && a.u64s[1] == b.u64s[1];
-}
-
-static int CompareTiles(const Tile **pa, const Tile **pb)
-{
-    int sum_a = 0;
-    int sum_b = 0;
-
-    const uint8_t *colors_a = (*pa)->color_indexes;
-    const uint8_t *colors_b = (*pb)->color_indexes;
-
-    for (int y = 0; y < 8; ++y)
-    {
-        for (int x = 0; x < 8; ++x)
-        {
-            sum_a += colors_a[x + y*8];
-            sum_b += colors_b[x + y*8];
-        }
-    }
-
-    return sum_a - sum_b;
-}
-
-static int CompareTilesVoidPtr(const void *a, const void *b)
-{
-    return CompareTiles((const Tile **)a, (const Tile **)b);
-}
-
-void UpdateSortedTiles(void)
-{
-    if (APP->tile_set.count == 0) return;
-    APP->sorted_tiles = NOB_REALLOC(APP->sorted_tiles, APP->tile_set.count * sizeof(*APP->sorted_tiles));
-    NOB_ASSERT(APP->sorted_tiles != NULL && "Buy more RAM lol");
-
-    for (size_t i = 0; i < APP->tile_set.count; ++i)
-    {
-        APP->sorted_tiles[i] = &APP->tile_set.items[i];
-    }
-
-    qsort(APP->sorted_tiles, APP->tile_set.count, sizeof(*APP->sorted_tiles), CompareTilesVoidPtr);
 }
 
 typedef struct
@@ -572,7 +542,7 @@ typedef struct
     uint32_t num_rows;
 } Tile_Picker_Props;
 
-Tile_Picker_Props GetTilePickerProps(Rectangle view)
+Tile_Picker_Props GetTilePickerProps(Rectangle view, Tile_Set tile_set)
 {
     float tile_size = APP->side_panel_zoom * 8.0f;
     if (tile_size > view.width)
@@ -594,7 +564,7 @@ Tile_Picker_Props GetTilePickerProps(Rectangle view)
     p.gap = gap;
     p.gap_min = gap_min;
     p.tiles_per_row = tiles_per_row;
-    p.num_rows = (APP->tile_set.count + tiles_per_row - 1) / tiles_per_row;
+    p.num_rows = (tile_set.count + tiles_per_row - 1) / tiles_per_row;
     return p;
 }
 
@@ -645,29 +615,22 @@ int32_t SidePanelGetHoveredTileIndex(Rectangle view, Vector2 point, Tile_Picker_
     return tile_x + p.tiles_per_row * tile_y;
 }
 
-void DrawSidePanel(Rectangle view)
+void DrawSidePanel(Rectangle view, Tile_Set tile_set)
 {
     BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
 
     ClearBackground(COLOR_TILESET_BACKGROUND);
 
-    Tile_Picker_Props props = GetTilePickerProps(view);
+    Tile_Picker_Props props = GetTilePickerProps(view, tile_set);
 
     // Draw tile set
-#ifdef SORT_TILES
-    UpdateSortedTiles();
-#endif
 
     Vector2 mouse = GetMousePosition();
     int32_t hovered_tile_index = SidePanelGetHoveredTileIndex(view, mouse, props);
 
-    for (int32_t i = 0; i < (int32_t)APP->tile_set.count; ++i)
+    for (int32_t i = 0; i < (int32_t)tile_set.count; ++i)
     {
-#ifdef SORT_TILES
-        Tile *tile = APP->sorted_tiles[i];
-#else
-        Tile *tile = &APP->tile_set.items[i];
-#endif
+        Tile *tile = &tile_set.items[i];
         Texture texture = tile->texture;
 
         Rectangle tile_rect = GetSidePanelTileRect(view, i, props);
@@ -699,13 +662,13 @@ void CopyTile(Tile *dst, Tile *src)
 
 #define INVALID_TILE_INDEX ((uint32_t)-1)
 
-uint32_t FindTileMatch(Tile *src_tile)
+uint32_t FindTileMatch(Tile_Set tile_set, Tile *src_tile)
 {
     Tile_GB src_tile_gb = TileToGB(src_tile);
 
-    for (uint32_t i = 0; i < APP->tile_set.count; ++i)
+    for (uint32_t i = 0; i < tile_set.count; ++i)
     {
-        Tile *tile = &APP->tile_set.items[i];
+        Tile *tile = &tile_set.items[i];
         Tile_GB tile_gb = TileToGB(tile);
         if (TileEqualsGB(src_tile_gb, tile_gb))
         {
@@ -715,15 +678,15 @@ uint32_t FindTileMatch(Tile *src_tile)
     return INVALID_TILE_INDEX;
 }
 
-void UpdateWorldTileFromEditTile(World_Tile *world_tile)
+void UpdateWorldTileFromEditTile(Level *level, Tile_Set *tile_set, Level_Tile *level_tile)
 {
-    assert(world_tile >= APP->level.tiles && world_tile < &APP->level.tiles[APP->level.width*APP->level.height]);
-    assert(world_tile->index < APP->tile_set.count);
+    assert(level_tile >= level->tiles && level_tile < &level->tiles[level->width*level->height]);
+    assert(level_tile->index < tile_set->count);
 
-    Tile *old_tile = GetTile(world_tile->index);
+    Tile *old_tile = GetTile(*tile_set, level_tile->index);
     assert(old_tile->ref_count >= 1);
 
-    uint32_t index = FindTileMatch(&APP->edit_tile);
+    uint32_t index = FindTileMatch(*tile_set, &APP->edit_tile);
 
     // No existing tile matches the edit tile
     if (index == INVALID_TILE_INDEX)
@@ -735,25 +698,25 @@ void UpdateWorldTileFromEditTile(World_Tile *world_tile)
             return;
         }
 
-        index = (uint32_t)APP->tile_set.count;
+        index = (uint32_t)tile_set->count;
         Tile tile = CreateCloneTile(&APP->edit_tile);
 
-        da_append(&APP->tile_set, tile);
+        da_append(tile_set, tile);
     }
 
-    assert(index < APP->tile_set.count);
+    assert(index < tile_set->count);
 
-    world_tile->index = index;
-    Tile *tile = GetTile(index);
+    level_tile->index = index;
+    Tile *tile = GetTile(*tile_set, index);
     assert(tile->color_indexes[0] < 4);
     tile->ref_count += 1; // Update reference count of new tile
-    assert(tile->ref_count < APP->level.width*APP->level.height);
+    assert(tile->ref_count < level->width*level->height);
 
     old_tile->ref_count -= 1;
-    assert(old_tile->ref_count < APP->level.width*APP->level.height);
+    assert(old_tile->ref_count < level->width*level->height);
 }
 
-void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_scroll)
+void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_scroll, Level *level, Tile_Set *tile_set)
 {
     Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, APP->camera_world);
     if (!IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && !IsKeyDown(KEY_SPACE))
@@ -774,11 +737,11 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
         if (IsKeyPressed(KEY_FOUR)) APP->current_color_idx = COLOR_GB_LIGHT;
 
         World_Position pos = GetWorldPosition(mouse_pos_world);
-        World_Tile *world_tile = GetWorldTile(pos.tile_x, pos.tile_y);
+        Level_Tile *level_tile = LevelGetTile(*level, pos.tile_x, pos.tile_y);
 
-        if (world_tile)
+        if (level_tile)
         {
-            Tile *tile = GetTile(world_tile->index);
+            Tile *tile = GetTile(*tile_set, level_tile->index);
 
             if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
             {
@@ -790,17 +753,17 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
                     }
 
                     World_Position pos_prev = GetWorldPosition(GetScreenToWorld2D(APP->mouse_previous, APP->camera_world));
-                    World_Tile *world_tile_prev = GetWorldTile(pos_prev.tile_x, pos_prev.tile_y);
-                    bool has_left_previous_tile = world_tile_prev && (pos_prev.tile_x != pos.tile_x || pos_prev.tile_y != pos.tile_y);
+                    Level_Tile *level_tile_prev = LevelGetTile(*level, pos_prev.tile_x, pos_prev.tile_y);
+                    bool has_left_previous_tile = level_tile_prev && (pos_prev.tile_x != pos.tile_x || pos_prev.tile_y != pos.tile_y);
 
                     if (has_left_previous_tile)
                     {
-                        UpdateWorldTileFromEditTile(world_tile_prev);
+                        UpdateWorldTileFromEditTile(level, tile_set, level_tile_prev);
 
                         // TODO make functions deal with only tile indicies
                         // and NOT tile pointers, the tile pointers are not
                         // stable!
-                        tile = GetTile(world_tile->index);
+                        tile = GetTile(*tile_set, level_tile->index);
 
                         CopyTile(&APP->edit_tile, tile);
                     }
@@ -811,7 +774,7 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
             }
             else if (APP->auto_new_tile && IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
             {
-                UpdateWorldTileFromEditTile(world_tile);
+                UpdateWorldTileFromEditTile(level, tile_set, level_tile);
             }
         }
     }
@@ -830,28 +793,28 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
             {
                 APP->current_tile_idx += change;
                 if (APP->current_tile_idx < 0) APP->current_tile_idx = 0;
-                else if (APP->current_tile_idx > APP->tile_set.count - 1) APP->current_tile_idx = (uint32_t)APP->tile_set.count - 1;
+                else if (APP->current_tile_idx > tile_set->count - 1) APP->current_tile_idx = (uint32_t)tile_set->count - 1;
             }
         }
 
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
             World_Position pos = GetWorldPosition(mouse_pos_world);
-            World_Tile *world_tile = GetWorldTile(pos.tile_x, pos.tile_y);
-            if (world_tile)
+            Level_Tile *level_tile = LevelGetTile(*level, pos.tile_x, pos.tile_y);
+            if (level_tile)
             {
                 if (APP->draw_solid_mask)
                 {
-                    world_tile->is_solid = APP->current_is_solid;
+                    level_tile->is_solid = APP->current_is_solid;
                 }
                 else
                 {
-                    Tile *old_tile = GetTile(world_tile->index);
+                    Tile *old_tile = GetTile(*tile_set, level_tile->index);
                     --old_tile->ref_count;
 
-                    world_tile->index = APP->current_tile_idx;
+                    level_tile->index = APP->current_tile_idx;
 
-                    Tile *new_tile = GetTile(world_tile->index);
+                    Tile *new_tile = GetTile(*tile_set, level_tile->index);
                     ++new_tile->ref_count;
                 }
             }
@@ -864,13 +827,13 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
 
 }
 
-void UpdateSidePanelView(Rectangle view, float scroll_input)
+void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
 {
     bool click = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 
     if (!scroll_input && !click) return;
 
-    Tile_Picker_Props p = GetTilePickerProps(view);
+    Tile_Picker_Props p = GetTilePickerProps(view, tile_set);
 
     if (scroll_input)
     {
@@ -899,7 +862,7 @@ void UpdateSidePanelView(Rectangle view, float scroll_input)
     }
 }
 
-void DrawBrushPreview(Rectangle world_view)
+void DrawBrushPreview(Rectangle world_view, Tile_Set tile_set)
 {
     float size = 100.0f;
     Rectangle rect =
@@ -916,7 +879,7 @@ void DrawBrushPreview(Rectangle world_view)
         legend = "TILE";
         if (APP->draw_solid_mask) legend = "TILE (SOLID)";
 
-        Texture texture = APP->tile_set.items[APP->current_tile_idx].texture;
+        Texture texture = tile_set.items[APP->current_tile_idx].texture;
         DrawTexturePro(texture, (Rectangle){0,0,8,8}, rect, (Vector2){0}, 0, WHITE);
     }
     else if (APP->mode == MODE_DRAW_PIXELS)
@@ -971,7 +934,7 @@ void BytesWriteTileGb(Bytes *b, Tile_GB tile)
     }
 }
 
-void BytesWriteTileSet(Bytes *b, Tiles tile_set)
+void BytesWriteTileSet(Bytes *b, Tile_Set tile_set)
 {
     BytesWriteChunkId(b, "TLST");
 
@@ -1036,7 +999,7 @@ void BytesWriteLevel(Bytes *b, Level level, uint16_t tile_set_index)
     *(uint32_t *)&b->items[chunk_len_loc] = b->count - chunk_len_loc;
 }
 
-void BytesWriteWorld(Bytes *b)
+void BytesWriteWorld(Bytes *b, Level level, Tile_Set tile_set)
 {
     // File format header
     BytesWriteChunkId(b, "\xffWLD");
@@ -1044,16 +1007,16 @@ void BytesWriteWorld(Bytes *b)
 
     // Write tile sets
     // TODO support more than one tile set
-    BytesWriteTileSet(b, APP->tile_set);
+    BytesWriteTileSet(b, tile_set);
 
     // Write levels
     // TODO support more than one level
-    BytesWriteLevel(b, APP->level, 0);
+    BytesWriteLevel(b, level, 0);
 }
 
 static const char *world_file_pattern = "*.wld";
 
-void SaveWorld(bool save_as)
+void SaveWorld(bool save_as, Level level, Tile_Set tile_set)
 {
     if (save_as || !APP->currently_open_world_file)
     {
@@ -1077,7 +1040,7 @@ void SaveWorld(bool save_as)
         APP->currently_open_world_file = file;
     }
 
-    BytesWriteWorld(&APP->serialization_buffer);
+    BytesWriteWorld(&APP->serialization_buffer, level, tile_set);
 
     // Write the buffer to the file
     size_t written = fwrite(APP->serialization_buffer.items, sizeof(uint8_t), APP->serialization_buffer.count, APP->currently_open_world_file);
@@ -1123,9 +1086,8 @@ bool LoadWorld(void)
 {
     char *load_file_path = tinyfd_openFileDialog("Load World", NULL, 1, &world_file_pattern, NULL, 0);
 
-    bool can_load = load_file_path != NULL && load_file_path[0] && file_exists(load_file_path);
-
-    if (!can_load) return false;
+    if (load_file_path == NULL || !load_file_path[0]) return false;
+    if (file_exists(load_file_path) < 1) return false;
 
     FILE *file = fopen(load_file_path, "rb+");
     if (!file)
@@ -1187,7 +1149,7 @@ void GlobalShortcuts(void)
         tinyfd_messageBox("Title", "Message", "ok", "info", 1);
     }
 
-    if (modifier_ctrl && IsKeyPressed(KEY_S)) SaveWorld(modifier_shift);
+    if (modifier_ctrl && IsKeyPressed(KEY_S)) SaveWorld(modifier_shift, APP->world.level, APP->world.tile_set);
     if (modifier_ctrl && IsKeyPressed(KEY_O)) LoadWorld();
 }
 
@@ -1219,10 +1181,10 @@ int main(int argc, char **argv)
         GlobalShortcuts();
 
         if (CheckCollisionPointRec(mouse_pos_screen, world_view))
-            UpdateWorldView(mouse_pos_screen, mouse_delta, mouse_scroll);
+            UpdateWorldView(mouse_pos_screen, mouse_delta, mouse_scroll, &APP->world.level, &APP->world.tile_set);
 
         if (CheckCollisionPointRec(mouse_pos_screen, side_panel_view))
-            UpdateSidePanelView(side_panel_view, mouse_scroll);
+            UpdateSidePanelView(side_panel_view, mouse_scroll, APP->world.tile_set);
 
         APP->mouse_previous = mouse_pos_screen;
 
@@ -1235,13 +1197,13 @@ int main(int argc, char **argv)
         BeginDrawing();
         ClearBackground(COLOR_WINDOW_BACKGROUND);
 
-        DrawWorldView(world_view, mouse_pos_screen);
+        DrawWorldView(world_view, APP->world, mouse_pos_screen);
         DrawRectangleLinesEx(world_view, 3, COLOR_PANEL_BORDER);
 
-        DrawSidePanel(side_panel_view);
+        DrawSidePanel(side_panel_view, APP->world.tile_set);
         DrawRectangleLinesEx(side_panel_view, 3, COLOR_PANEL_BORDER);
 
-        DrawBrushPreview(world_view);
+        DrawBrushPreview(world_view, APP->world.tile_set);
 
         EndDrawing();
 
