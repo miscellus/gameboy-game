@@ -270,6 +270,25 @@ Tile_GB TileToGB(Tile *tile)
     return tile_gb;
 }
 
+Tile TileFromGB(Tile_GB tile_gb)
+{
+    Tile tile = {0};
+
+    for (int y = 0; y < 8; ++y)
+    {
+        for (int x = 0; x < 8; ++x)
+        {
+            uint8_t pixel = 0;
+            if (tile_gb.lines[y].bit_planes[0] & (0x80 >> x)) pixel |= 1;
+            if (tile_gb.lines[y].bit_planes[1] & (0x80 >> x)) pixel |= 2;
+            tile.color_indexes[8 * y + x] = pixel;
+        }
+    }
+
+    return tile;
+}
+
+
 World_Position GetWorldPosition(Vector2 point)
 {
     float tile_x = point.x / 8.0f;
@@ -311,6 +330,29 @@ void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_in
     UpdateTextureRec(tile->texture, (Rectangle){(float)pixel_x, (float)pixel_y, 1.0f, 1.0f}, &pixel);
 }
 
+void InitWorld(World *world, uint32_t level_width, uint32_t level_height)
+{
+    world->level.width = level_width;
+    world->level.height = level_height;
+    size_t num_tiles = world->level.width * world->level.height;
+    world->level.tiles = malloc(num_tiles*sizeof(*world->level.tiles));
+    memset(world->level.tiles, 0xcd, num_tiles*sizeof(*world->level.tiles));
+
+    world->tile_set.capacity = 0;
+    world->tile_set.count = 0;
+    world->tile_set.items = NULL;
+
+    for (size_t i = 0; i < num_tiles; ++i)
+    {
+        world->level.tiles[i].index = 0;
+        world->level.tiles[i].is_solid = 0;
+    }
+
+    Tile tile = CreateTile(COLOR_GB_LIGHT);
+    tile.ref_count = (uint32_t)num_tiles;
+    da_append(&world->tile_set, tile);
+}
+
 void InitApp(void)
 {
     APP = malloc(sizeof(*APP));
@@ -339,25 +381,7 @@ void InitApp(void)
     APP->auto_new_tile = true;
     APP->is_auto_tiling = true;
 
-    APP->world.level.width = 128;
-    APP->world.level.height = 64;
-    size_t num_tiles = APP->world.level.width * APP->world.level.height;
-    APP->world.level.tiles = malloc(num_tiles*sizeof(*APP->world.level.tiles));
-    memset(APP->world.level.tiles, 0xcd, num_tiles*sizeof(*APP->world.level.tiles));
-
-    APP->world.tile_set.capacity = 0;
-    APP->world.tile_set.count = 0;
-    APP->world.tile_set.items = NULL;
-
-    for (size_t i = 0; i < num_tiles; ++i)
-    {
-        APP->world.level.tiles[i].index = 0;
-        APP->world.level.tiles[i].is_solid = 0;
-    }
-
-    Tile tile = CreateTile(COLOR_GB_LIGHT);
-    tile.ref_count = (uint32_t)num_tiles;
-    da_append(&APP->world.tile_set, tile);
+    InitWorld(&APP->world, 128, 64);
 
     APP->edit_tile = CreateTile(COLOR_GB_MID_DARK);
 
@@ -903,7 +927,7 @@ void DrawBrushPreview(Rectangle world_view, Tile_Set tile_set)
     DrawTextEx(font, legend, pos, font_size, spacing, WHITE);
 }
 
-void BytesWriteU32(Bytes *b, uint32_t v)
+void SerializeU32(Bytes *b, uint32_t v)
 {
     da_append(b, (uint8_t)(v >>  0));
     da_append(b, (uint8_t)(v >>  8));
@@ -911,13 +935,13 @@ void BytesWriteU32(Bytes *b, uint32_t v)
     da_append(b, (uint8_t)(v >> 24));
 }
 
-void BytesWriteU16(Bytes *b, uint16_t v)
+void SerializeU16(Bytes *b, uint16_t v)
 {
     da_append(b, (uint8_t)(v >> 0));
     da_append(b, (uint8_t)(v >> 8));
 }
 
-#define BytesWriteChunkId(b, s) do \
+#define SerializeChunkId(b, s) do \
 { \
     da_append(b, (s)[0]); \
     da_append(b, (s)[1]); \
@@ -925,61 +949,62 @@ void BytesWriteU16(Bytes *b, uint16_t v)
     da_append(b, (s)[3]); \
 } while(0)
 
-void BytesWriteTileGb(Bytes *b, Tile_GB tile)
+void SerializeTile(Bytes *b, Tile *tile)
 {
+    Tile_GB tile_gb = TileToGB(tile);
+
     for (uint32_t i = 0; i < 8; ++i)
     {
-        da_append(b, tile.lines[i].bit_planes[0]);
-        da_append(b, tile.lines[i].bit_planes[1]);
+        da_append(b, tile_gb.lines[i].bit_planes[0]);
+        da_append(b, tile_gb.lines[i].bit_planes[1]);
     }
 }
 
-void BytesWriteTileSet(Bytes *b, Tile_Set tile_set)
+void SerializeTileSet(Bytes *b, Tile_Set tile_set)
 {
-    BytesWriteChunkId(b, "TLST");
+    SerializeChunkId(b, "TLST");
 
     uint32_t chunk_len_loc = b->count;
-    BytesWriteU32(b, 0); // Replace later with actual chunk length
+    SerializeU32(b, 0); // Replace later with actual chunk length
 
     assert(tile_set.count <= 65535);
-    BytesWriteU16(b, (uint16_t)tile_set.count);
+    SerializeU16(b, (uint16_t)tile_set.count);
 
     for (uint32_t i = 0; i < tile_set.count; ++i)
     {
-        Tile_GB tile_gb = TileToGB(&tile_set.items[i]);
-        BytesWriteTileGb(b, tile_gb);
+        SerializeTile(b, &tile_set.items[i]);
     }
 
     // Backfill chunk length field
     *(uint32_t *)&b->items[chunk_len_loc] = b->count - chunk_len_loc;
 }
 
-void BytesWriteLevel(Bytes *b, Level level, uint16_t tile_set_index)
+void SerializeLevel(Bytes *b, Level level, uint16_t tile_set_index)
 {
-    BytesWriteChunkId(b, "LEVL");
+    SerializeChunkId(b, "LEVL");
 
     uint32_t chunk_len_loc = b->count;
-    BytesWriteU32(b, 0); // Replace later with actual chunk length
+    SerializeU32(b, 0); // Replace later with actual chunk length
 
     assert(level.width <= 65536);
-    BytesWriteU16(b, (uint16_t)level.width);
+    SerializeU16(b, (uint16_t)level.width);
 
     assert(level.height <= 65536);
-    BytesWriteU16(b, (uint16_t)level.height);
+    SerializeU16(b, (uint16_t)level.height);
 
-    BytesWriteU16(b, tile_set_index);
+    SerializeU16(b, tile_set_index);
 
-    da_reserve(b, b->count + level.width*level.height * sizeof(uint16_t));
+    // da_reserve(b, b->count + level.width*level.height * sizeof(uint16_t));
 
     for (uint32_t i = 0; i < level.width*level.height; ++i)
     {
         assert(level.tiles[i].index < 65536);
-        BytesWriteU16(b, (uint16_t)level.tiles[i].index);
+        SerializeU16(b, (uint16_t)level.tiles[i].index);
     }
 
     assert(level.width*level.height % 8 == 0);
 
-    da_reserve(b, b->count + level.width*level.height);
+    // da_reserve(b, b->count + level.width*level.height);
     for (uint32_t i = 0; i < level.width*level.height; i += 8)
     {
         uint8_t solid_bits =
@@ -999,19 +1024,27 @@ void BytesWriteLevel(Bytes *b, Level level, uint16_t tile_set_index)
     *(uint32_t *)&b->items[chunk_len_loc] = b->count - chunk_len_loc;
 }
 
-void BytesWriteWorld(Bytes *b, Level level, Tile_Set tile_set)
+void SerializeWorld(Bytes *b, Level level, Tile_Set tile_set)
 {
     // File format header
-    BytesWriteChunkId(b, "\xffWLD");
-    BytesWriteU16(b, APP->save_file_format_version);
+    SerializeChunkId(b, "\xffWLD");
+    SerializeU16(b, APP->save_file_format_version);
 
     // Write tile sets
     // TODO support more than one tile set
-    BytesWriteTileSet(b, tile_set);
+    SerializeTileSet(b, tile_set);
 
     // Write levels
     // TODO support more than one level
-    BytesWriteLevel(b, level, 0);
+    SerializeLevel(b, level, 0);
+}
+
+void SetOpenFilePath(const char *currently_open_world_file_path)
+{
+    APP->currently_open_world_file_path = currently_open_world_file_path;
+    size_t tmp = temp_save();
+    SetWindowTitle(temp_sprintf("Game Boy World Editor (%.100s)", currently_open_world_file_path));
+    temp_rewind(tmp);
 }
 
 static const char *world_file_pattern = "*.wld";
@@ -1021,9 +1054,8 @@ void SaveWorld(bool save_as, Level level, Tile_Set tile_set)
     if (save_as || !APP->currently_open_world_file)
     {
         char *save_file_path = tinyfd_saveFileDialog("Save World", NULL, 1, &world_file_pattern, NULL);
-        bool allowed_to_save = save_file_path != NULL && save_file_path[0] && !file_exists(save_file_path);
 
-        if (!allowed_to_save) return;
+        if (save_file_path == NULL || save_file_path[0] == '\0') return;
 
         FILE *file = fopen(save_file_path, "wb");
         if (!file)
@@ -1036,26 +1068,29 @@ void SaveWorld(bool save_as, Level level, Tile_Set tile_set)
         }
 
         if (APP->currently_open_world_file) fclose(APP->currently_open_world_file);
-        APP->currently_open_world_file_path = save_file_path;
+        SetOpenFilePath(save_file_path);
         APP->currently_open_world_file = file;
     }
 
-    BytesWriteWorld(&APP->serialization_buffer, level, tile_set);
+    SerializeWorld(&APP->serialization_buffer, level, tile_set);
 
     // Write the buffer to the file
     size_t written = fwrite(APP->serialization_buffer.items, sizeof(uint8_t), APP->serialization_buffer.count, APP->currently_open_world_file);
-    APP->serialization_buffer.count = 0;
 
     if (written != APP->serialization_buffer.count)
     {
         tinyfd_messageBox("Could not write to file", "Could not write to file", "ok", "warning", 1);
         perror("Error writing to file");
         fclose(APP->currently_open_world_file);
+        APP->currently_open_world_file = NULL;
+        APP->currently_open_world_file_path = NULL;
     }
     else
     {
         nob_log(INFO, "Saved world.");
     }
+
+    APP->serialization_buffer.count = 0;
 }
 
 bool BytesReadFile(Bytes *b, FILE *f)
@@ -1082,10 +1117,169 @@ bool BytesReadFile(Bytes *b, FILE *f)
     return true;
 }
 
-bool LoadWorld(void)
-{
-    char *load_file_path = tinyfd_openFileDialog("Load World", NULL, 1, &world_file_pattern, NULL, 0);
+#define ChunkIdMake(A, B, C, D) (((uint32_t)(A) << 0) | ((uint32_t)(B) << 8) | ((uint32_t)(C) << 16) | ((uint32_t)(D) << 24))
+#define ChunkIdMakeFromBytes(b) (((uint32_t)(b)[0] << 0) | ((uint32_t)(b)[1] << 8) | ((uint32_t)(b)[2] << 16) | ((uint32_t)(b)[3] << 24))
 
+static inline bool DeserializeChunkId(uint8_t **at, uint8_t *end, uint32_t *chunk_id)
+{
+    if (*at >= end - sizeof(*chunk_id)) return false;
+    *chunk_id = ChunkIdMakeFromBytes(*at);
+    *at += sizeof(*chunk_id);
+
+    return true;
+}
+
+static inline bool DeserializeExpectChunkId(uint8_t **at, uint8_t *end, uint32_t expected_chunk_id)
+{
+    uint32_t chunk_id;
+    if (!DeserializeChunkId(at, end, &chunk_id)) return false;
+    return chunk_id == expected_chunk_id;
+}
+
+bool DeserializeU8(uint8_t **at, uint8_t *end, uint8_t *v)
+{
+    if (*at + sizeof(*v) >= end) return false;
+    *v = *(uint8_t *)(*at);
+    *at += sizeof(*v);
+    return true;
+}
+
+bool DeserializeU16(uint8_t **at, uint8_t *end, uint16_t *v)
+{
+    if (*at + sizeof(*v) >= end) return false;
+    *v = *(uint16_t *)(*at);
+    *at += sizeof(*v);
+    return true;
+}
+
+bool DeserializeU32(uint8_t **at, uint8_t *end, uint32_t *v)
+{
+    if (*at + sizeof(*v) >= end) return false;
+    *v = *(uint32_t *)(*at);
+    *at += sizeof(*v);
+    return true;
+}
+
+bool DeserializeLevel(uint8_t **at, uint8_t *end, Level *level)
+{
+    uint16_t width = 0;
+    if (!DeserializeU16(at, end, &width)) return false;
+    assert(width < 256 && width > 0);
+
+    uint16_t height = 0;
+    if (!DeserializeU16(at, end, &height)) return false;
+    assert(height < 256 && height > 0);
+
+    assert(width * height % 8 == 0);
+
+    uint16_t tile_set_index = 0;
+    if (!DeserializeU16(at, end, &tile_set_index)) return false;
+    assert(tile_set_index < 256);
+
+    void *new_tiles = realloc(level->tiles, width * height * sizeof(level->tiles[0]));
+    assert(new_tiles);
+
+    level->tiles = new_tiles;
+    level->width = width;
+    level->height = height;
+    level->tile_set_index = tile_set_index;
+
+    // Deserialize tiles
+    for (int32_t i = 0; i < width*height; ++i)
+    {
+        uint16_t tile_index = 0;
+        if (!DeserializeU16(at, end, &tile_index)) return false;
+
+        level->tiles[i].index = tile_index;
+    }
+
+    // Deserialize solid bits
+    if (*at + width*height/8 > end) return false;
+    for (int32_t i = 0; i < width*height; i += 8, *at += 1)
+    {
+        uint8_t solid_bits = **at;
+        level->tiles[i + 0].is_solid = !!(solid_bits & (1 << 7));
+        level->tiles[i + 1].is_solid = !!(solid_bits & (1 << 6));
+        level->tiles[i + 2].is_solid = !!(solid_bits & (1 << 5));
+        level->tiles[i + 3].is_solid = !!(solid_bits & (1 << 4));
+        level->tiles[i + 4].is_solid = !!(solid_bits & (1 << 3));
+        level->tiles[i + 5].is_solid = !!(solid_bits & (1 << 2));
+        level->tiles[i + 6].is_solid = !!(solid_bits & (1 << 1));
+        level->tiles[i + 7].is_solid = !!(solid_bits & (1 << 0));
+    }
+
+    return true;
+}
+
+bool DeserializeTileSet(uint8_t **at, uint8_t *end, Tile_Set *tile_set)
+{
+    uint16_t tile_count;
+    if (!DeserializeU16(at, end, &tile_count)) return false;
+    assert(tile_count < 1024);
+
+    da_reserve(tile_set, tile_count);
+    tile_set->count = tile_count;
+
+    if (*at >= end - tile_count * sizeof(Tile_GB)) return false;
+
+    for (uint16_t i = 0; i < tile_count; ++i, *at += sizeof(Tile_GB))
+    {
+        Tile_GB tile_gb = *(Tile_GB *)(*at);
+        Tile tile = TileFromGB(tile_gb);
+        tile_set->items[i] = tile;
+    }
+
+    return true;
+}
+
+bool DeserializeWorld(World *world, Bytes *b)
+{
+    uint8_t *at = b->items;
+    uint8_t *end = b->items + b->count;
+
+    uint32_t expected_chunk_id = 0x444c57ff;
+
+    if (!DeserializeExpectChunkId(&at, end, expected_chunk_id)) return false;
+
+    uint16_t version;
+    if (!DeserializeU16(&at, end, &version)) return false;
+
+    if (version != APP->save_file_format_version) return false;
+
+    while (at < end)
+    {
+        uint32_t chunk_id = 0;
+        if (!DeserializeChunkId(&at, end, &chunk_id)) return false;
+
+        uint32_t chunk_size = 0;
+        if (!DeserializeU32(&at, end, &chunk_size)) return false;
+
+        switch (chunk_id)
+        {
+            case ChunkIdMake('L','E','V','L'): // Level
+            {
+                // TODO: Cleanup old
+                if (!DeserializeLevel(&at, end, &world->level)) return false;
+            } break;
+
+            case ChunkIdMake('T','L','S','T'): // Tile Set
+            {
+                // TODO: Cleanup old
+                if (!DeserializeTileSet(&at, end, &world->tile_set)) return false;
+            } break;
+
+            default:
+                fprintf(stderr, "Unknown chunk while reading world file, %x\n", chunk_id);
+                assert(at + chunk_size <= end);
+                at += chunk_size;
+        }
+    }
+
+    return true;
+}
+
+bool LoadWorldByPath(World *world, char *load_file_path)
+{
     if (load_file_path == NULL || !load_file_path[0]) return false;
     if (file_exists(load_file_path) < 1) return false;
 
@@ -1103,7 +1297,12 @@ bool LoadWorld(void)
         goto error;
     }
 
-    APP->currently_open_world_file_path = load_file_path;
+    if (!DeserializeWorld(world, &APP->serialization_buffer))
+    {
+        goto error;
+    }
+
+    SetOpenFilePath(load_file_path);
     APP->currently_open_world_file = file;
 
     return true;
@@ -1117,6 +1316,12 @@ error:
     APP->serialization_buffer.count = 0;
 
     return false;
+}
+
+bool LoadWorld(World *world)
+{
+    char *load_file_path = tinyfd_openFileDialog("Load World", NULL, 1, &world_file_pattern, NULL, 0);
+    return LoadWorldByPath(world, load_file_path);
 }
 
 void GlobalShortcuts(void)
@@ -1150,7 +1355,7 @@ void GlobalShortcuts(void)
     }
 
     if (modifier_ctrl && IsKeyPressed(KEY_S)) SaveWorld(modifier_shift, APP->world.level, APP->world.tile_set);
-    if (modifier_ctrl && IsKeyPressed(KEY_O)) LoadWorld();
+    if (modifier_ctrl && IsKeyPressed(KEY_O)) LoadWorld(&APP->world);
 }
 
 int main(int argc, char **argv)
@@ -1164,6 +1369,8 @@ int main(int argc, char **argv)
     SetTargetFPS(120);
 
     InitApp();
+
+    // return !LoadWorldByPath(&APP->world, "C:\\Users\\Jakob\\Documents\\First_Real_World.wld");
 
     while (!WindowShouldClose())
     {
