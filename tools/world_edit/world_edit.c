@@ -178,6 +178,22 @@ typedef struct App
 
 App *APP;
 
+typedef struct KeyModifiers
+{
+    bool alt;
+    bool ctrl;
+    bool shift;
+} KeyModifiers;
+
+static inline KeyModifiers GetKeyModifiers(void)
+{
+    KeyModifiers result = {0};
+    result.alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
+    result.ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    result.shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+    return result;
+}
+
 void CameraZoomByFactor(Camera2D *camera, float zoom_factor, float zoom_min, float zoom_max)
 {
 	camera->zoom += zoom_factor * camera->zoom;
@@ -693,9 +709,9 @@ void DrawSidePanel(Rectangle view, Tile_Set tile_set)
     // Draw tile set
 
     Vector2 mouse = GetMousePosition();
-    int32_t hovered_tile_index = SidePanelGetHoveredTileIndex(view, mouse, props);
+    uint32_t hovered_tile_index = (uint32_t)SidePanelGetHoveredTileIndex(view, mouse, props);
 
-    for (int32_t i = 0; i < (int32_t)tile_set.count; ++i)
+    for (uint32_t i = 0; i < (uint32_t)tile_set.count; ++i)
     {
         Tile *tile = &tile_set.items[i];
         Texture2D texture = GetTexture(tile->texture_index);
@@ -704,6 +720,12 @@ void DrawSidePanel(Rectangle view, Tile_Set tile_set)
         Color tint = tile->ref_count ? WHITE : (Color){255, 100, 100, 255};
         if (i == hovered_tile_index) tint = BLUE;
         DrawTexturePro(texture, (Rectangle){0,0,8,8}, tile_rect, (Vector2){0}, 0, tint);
+        if (i == APP->current_tile_idx)
+        {
+            float border = props.gap_min;
+            Rectangle border_rect = PadRect(tile_rect, -border);
+            DrawRectangleLinesEx(border_rect, border, BLACK);
+        }
     }
     // DrawText(TextFormat("%0.2f", tile_size), (int)(view.x + 20), (int)(view.y + 20), 50, RED);
 
@@ -902,9 +924,11 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
 
     Tile_Picker_Props p = GetTilePickerProps(view, tile_set);
 
+    KeyModifiers modifiers = GetKeyModifiers();
+
     if (scroll_input)
     {
-        if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+        if (modifiers.ctrl)
         {
             float zoom_factor = 0.1f * scroll_input;
             APP->side_panel_zoom += zoom_factor * APP->side_panel_zoom;
@@ -1390,11 +1414,9 @@ bool LoadWorld(World *world)
 
 void GlobalShortcuts(void)
 {
-    bool modifier_alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
-    bool modifier_ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
-    bool modifier_shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+    KeyModifiers modifiers = GetKeyModifiers();
 
-    if (modifier_alt && IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_F11))
+    if (modifiers.alt && IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_F11))
     {
         ToggleFullscreen();
     }
@@ -1402,7 +1424,7 @@ void GlobalShortcuts(void)
 
     if (IsKeyPressed(KEY_TAB))
     {
-        if (modifier_shift)
+        if (modifiers.shift)
         {
             APP->draw_solid_mask ^= APP->mode == MODE_DRAW_TILES;
             APP->auto_new_tile ^= APP->mode == MODE_DRAW_PIXELS;
@@ -1418,8 +1440,8 @@ void GlobalShortcuts(void)
         tinyfd_messageBox("Title", "Message", "ok", "info", 1);
     }
 
-    if (modifier_ctrl && IsKeyPressed(KEY_S)) SaveWorld(modifier_shift, APP->world.level, APP->world.tile_set);
-    if (modifier_ctrl && IsKeyPressed(KEY_O)) LoadWorld(&APP->world);
+    if (modifiers.ctrl && IsKeyPressed(KEY_S)) SaveWorld(modifiers.shift, APP->world.level, APP->world.tile_set);
+    if (modifiers.ctrl && IsKeyPressed(KEY_O)) LoadWorld(&APP->world);
 }
 
 int main(int argc, char **argv)
