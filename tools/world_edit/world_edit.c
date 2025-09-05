@@ -180,7 +180,6 @@ typedef struct App
     Tile **sorted_tiles;
 
     const char *currently_open_world_file_path;
-    FILE *currently_open_world_file;
     uint16_t save_file_format_version;
     Bytes serialization_buffer;
 } App;
@@ -243,26 +242,38 @@ uint32_t CreateTileTexture(Color pixels[8*8])
     return index;
 }
 
-static Tile CreateCloneTile(Tile *src_tile)
+static void CreatePixels(Tile *tile, Color pixels[8*8])
 {
-    Tile tile = {0};
-    Color pixels[8*8];
-
     for (int i = 0; i < 8*8; ++i)
     {
-        uint8_t color_index = src_tile->color_indexes[i];
-        if (!(color_index < 4))
-        {
-            fprintf(stderr, "color_index < 4: i = %d\n", i);
-            src_tile = src_tile;
-        }
+        uint8_t color_index = tile->color_indexes[i];
         assert(color_index < 4);
-        tile.color_indexes[i] = color_index;
+        tile->color_indexes[i] = color_index;
         pixels[i] = palette_gbp[color_index];
     }
+}
 
-    tile.texture_index = CreateTileTexture(pixels);
+static void ConvertColorIndexesToPixels(uint8_t color_indexes[8*8], Color pixels[8*8])
+{
+    for (int i = 0; i < 8*8; ++i)
+    {
+        uint8_t color_index = color_indexes[i];
+        assert(color_index < 4);
+        pixels[i] = palette_gbp[color_index];
+    }
+}
 
+static void InitTileTexture(Tile *tile)
+{
+    Color pixels[8*8];
+    ConvertColorIndexesToPixels(tile->color_indexes, pixels);
+    tile->texture_index = CreateTileTexture(pixels);
+}
+
+static Tile CreateCloneTile(Tile *src_tile)
+{
+    Tile tile = *src_tile;
+    InitTileTexture(&tile);
     return tile;
 }
 
@@ -420,14 +431,14 @@ void InitApp(void)
 
     APP->textures = (Textures){0};
 
+    APP->edit_tile = CreateTile(COLOR_GB_MID_DARK);
+
     InitWorld(&APP->world, 128, 64);
 
-    APP->edit_tile = CreateTile(COLOR_GB_MID_DARK);
 
     APP->sorted_tiles = NULL;
 
     APP->currently_open_world_file_path = NULL;
-    APP->currently_open_world_file = NULL;
     APP->save_file_format_version = 0;
     APP->serialization_buffer = (Bytes){0};
 }
@@ -1091,38 +1102,37 @@ static const char *world_file_pattern = "*.wld";
 
 void SaveWorld(bool save_as, Level level, Tile_Set tile_set)
 {
-    if (save_as || !APP->currently_open_world_file)
+    const char *save_file_path = APP->currently_open_world_file_path;
+
+    if (save_as || !APP->currently_open_world_file_path)
     {
-        char *save_file_path = tinyfd_saveFileDialog("Save World", NULL, 1, &world_file_pattern, NULL);
-
+        save_file_path = tinyfd_saveFileDialog("Save World", NULL, 1, &world_file_pattern, NULL);
         if (save_file_path == NULL || save_file_path[0] == '\0') return;
-
-        FILE *file = fopen(save_file_path, "wb");
-        if (!file)
-        {
-            size_t tmp = temp_save();
-            char *message = temp_sprintf("Could not open %.100s for writing", save_file_path);
-            tinyfd_messageBox("Could not open file for saving", message, "ok", "warning", 1);
-            temp_rewind(tmp);
-            return;
-        }
-
-        if (APP->currently_open_world_file) fclose(APP->currently_open_world_file);
-        SetOpenFilePath(save_file_path);
-        APP->currently_open_world_file = file;
     }
 
+    FILE *file = fopen(save_file_path, "wb");
+    if (!file)
+    {
+        size_t tmp = temp_save();
+        char *message = temp_sprintf("Could not open %.100s for writing", save_file_path);
+        tinyfd_messageBox("Could not open file for saving", message, "ok", "warning", 1);
+        temp_rewind(tmp);
+        return;
+    }
+
+    SetOpenFilePath(save_file_path);
+
+    APP->serialization_buffer.count = 0;
     SerializeWorld(&APP->serialization_buffer, level, tile_set);
 
     // Write the buffer to the file
-    size_t written = fwrite(APP->serialization_buffer.items, sizeof(uint8_t), APP->serialization_buffer.count, APP->currently_open_world_file);
+    size_t written = fwrite(APP->serialization_buffer.items, sizeof(uint8_t), APP->serialization_buffer.count, file);
+    fclose(file);
 
     if (written != APP->serialization_buffer.count)
     {
         tinyfd_messageBox("Could not write to file", "Could not write to file", "ok", "warning", 1);
         perror("Error writing to file");
-        fclose(APP->currently_open_world_file);
-        APP->currently_open_world_file = NULL;
         APP->currently_open_world_file_path = NULL;
     }
     else
@@ -1323,13 +1333,11 @@ bool LoadWorldByPath(World *world, char *load_file_path)
     if (load_file_path == NULL || !load_file_path[0]) return false;
     if (file_exists(load_file_path) < 1) return false;
 
-    FILE *file = fopen(load_file_path, "rb+");
+    FILE *file = fopen(load_file_path, "rb");
     if (!file)
     {
         goto error;
     }
-
-    if (APP->currently_open_world_file) fclose(APP->currently_open_world_file);
 
     APP->serialization_buffer.count = 0;
     if (!BytesReadFile(&APP->serialization_buffer, file))
@@ -1342,9 +1350,33 @@ bool LoadWorldByPath(World *world, char *load_file_path)
         goto error;
     }
 
-    SetOpenFilePath(load_file_path);
-    APP->currently_open_world_file = file;
+    // Unload old textures
+    {
+        // Skip APP->textures.items[0] since that is reserved for the edit tile
+        for (uint32_t i = 1; i < APP->textures.count; ++i)
+            UnloadTexture(APP->textures.items[i]);
 
+        APP->textures.count = 1;
+    }
+
+    // Give textures to all tiles
+    for (uint32_t i = 0; i < world->tile_set.count; ++i)
+    {
+        Tile *tile = &world->tile_set.items[i];
+        InitTileTexture(tile);
+    }
+
+    // Ref count new tiles
+    for (uint32_t i = 0; i < world->level.width * world->level.height; ++i)
+    {
+        uint32_t tile_index = world->level.tiles[i].index;
+        assert(tile_index < world->tile_set.count);
+
+        world->tile_set.items[tile_index].ref_count += 1;
+    }
+
+    fclose(file);
+    SetOpenFilePath(load_file_path);
     return true;
 
 error:
@@ -1402,8 +1434,6 @@ int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
-    printf("Hello, World!\n");
-
     InitWindow(1024, 768, "Game Boy World Editor");
     SetWindowState(FLAG_WINDOW_RESIZABLE);
     SetTargetFPS(120);
