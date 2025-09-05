@@ -113,14 +113,6 @@ typedef struct Tile_Set
     uint32_t capacity;
 } Tile_Set;
 
-typedef struct TilePtrs
-{
-    // Dynamic array of indexes
-    Tile **items;
-    size_t count;
-    size_t capacity;
-} TilePtrs;
-
 typedef struct Level_Tile
 {
     uint32_t index;
@@ -1439,8 +1431,6 @@ int main(int argc, char **argv)
     SetTargetFPS(120);
 
     InitApp();
-
-    // return !LoadWorldByPath(&APP->world, "C:\\Users\\Jakob\\Documents\\First_Real_World.wld");
 
     while (!WindowShouldClose())
     {
