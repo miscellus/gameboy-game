@@ -920,6 +920,8 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
 {
     bool click = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 
+    bool delete_pressed = IsKeyPressed(KEY_DELETE);
+
     if (!scroll_input && !click) return;
 
     Tile_Picker_Props p = GetTilePickerProps(view, tile_set);
@@ -949,6 +951,14 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
         if (tile_index >= 0)
         {
             APP->current_tile_idx = tile_index;
+        }
+    }
+
+    if (delete_pressed)
+    {
+        if (modifiers.shift)
+        {
+            // TODO: Delete all unreferenced tiles
         }
     }
 }
