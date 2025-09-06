@@ -916,13 +916,51 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
 
 }
 
+void DeleteTile(uint32_t tile_index, Tile_Set *tile_set, World *world)
+{
+    assert(tile_index < tile_set->count);
+
+    if (tile_set->count == 1) return;
+
+    // TODO: @leak
+    // UnloadTexture(GetTile(tile_set->items[tile_index].texture_index));
+
+    // Delete tile in tile_set
+    uint32_t last_index = tile_set->count - 1;
+    if (tile_index < last_index)
+    {
+        void *dst = &tile_set->items[tile_index];
+        void *src = &tile_set->items[tile_index + 1];
+        size_t size = (last_index - tile_index) * sizeof(*tile_set->items);
+        memmove(dst, src, size);
+    }
+    --tile_set->count;
+
+    // If we delete the last tile in the set, make sure we update level tiles
+    // using it to the previous index
+    if (tile_index == last_index) --tile_index;
+
+    // Update references
+    for (uint32_t i = 0; i < world->level.width*world->level.height; ++i)
+    {
+        Level_Tile *level_tile = &world->level.tiles[i];
+        if (level_tile->index > tile_index)
+        {
+            if (level_tile->index < tile_set->count) --tile_set->items[level_tile->index].ref_count;
+            --level_tile->index;
+            ++tile_set->items[level_tile->index].ref_count;
+        }
+    }
+}
+
+
 void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
 {
     bool click = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 
     bool delete_pressed = IsKeyPressed(KEY_DELETE);
 
-    if (!scroll_input && !click) return;
+    if (!scroll_input && !click && !delete_pressed) return;
 
     Tile_Picker_Props p = GetTilePickerProps(view, tile_set);
 
@@ -958,7 +996,11 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
     {
         if (modifiers.shift)
         {
-            // TODO: Delete all unreferenced tiles
+            DeleteTile(APP->current_tile_idx, &APP->world.tile_set, &APP->world);
+            if (APP->current_tile_idx > APP->world.tile_set.count - 1)
+            {
+                APP->current_tile_idx = APP->world.tile_set.count - 1;
+            }
         }
     }
 }
