@@ -1235,8 +1235,8 @@ bool BytesReadFile(Bytes *b, FILE *f)
     return true;
 }
 
-#define ChunkIdMake(A, B, C, D) (((uint32_t)(A) << 0) | ((uint32_t)(B) << 8) | ((uint32_t)(C) << 16) | ((uint32_t)(D) << 24))
-#define ChunkIdMakeFromBytes(b) (((uint32_t)(b)[0] << 0) | ((uint32_t)(b)[1] << 8) | ((uint32_t)(b)[2] << 16) | ((uint32_t)(b)[3] << 24))
+#define ChunkIdMake(A, B, C, D) (((uint32_t)(uint8_t)(A) << 0) | ((uint32_t)(uint8_t)(B) << 8) | ((uint32_t)(uint8_t)(C) << 16) | ((uint32_t)(uint8_t)(D) << 24))
+#define ChunkIdMakeFromBytes(b) (((uint32_t)(uint8_t)(b)[0] << 0) | ((uint32_t)(uint8_t)(b)[1] << 8) | ((uint32_t)(uint8_t)(b)[2] << 16) | ((uint32_t)(uint8_t)(b)[3] << 24))
 
 static inline bool DeserializeChunkId(uint8_t **at, uint8_t *end, uint32_t *chunk_id)
 {
@@ -1355,7 +1355,7 @@ bool DeserializeWorld(World *world, Bytes *b)
     uint8_t *at = b->items;
     uint8_t *end = b->items + b->count;
 
-    uint32_t expected_chunk_id = 0x444c57ff;
+    uint32_t expected_chunk_id = ChunkIdMake('\xff','W','L','D');
 
     if (!DeserializeExpectChunkId(&at, end, expected_chunk_id)) return false;
 
