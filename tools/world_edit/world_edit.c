@@ -85,19 +85,6 @@ typedef union Tile_GB
     uint64_t u64s[2];
 } Tile_GB;
 
-typedef struct Textures
-{
-    Texture *items;
-    uint32_t count;
-    uint32_t capacity;
-    struct
-    {
-        uint32_t *items;
-        uint32_t count;
-        uint32_t capacity;
-    } free;
-} Textures;
-
 typedef struct Tile
 {
     uint8_t color_indexes[8*8]; // NOTE(jkk): In range 0-3
@@ -122,9 +109,9 @@ typedef struct Level_Tile
 typedef struct Level
 {
     Level_Tile *tiles;
-    size_t width;
-    size_t height;
-    size_t tile_set_index;
+    uint32_t width;
+    uint32_t height;
+    uint32_t tile_set_index;
 } Level;
 
 typedef struct World
@@ -164,12 +151,10 @@ typedef struct App
     bool is_auto_tiling;
 
     World world;
+    Color *canvas_pixels;
+    Texture canvas;
 
     Tile edit_tile; // The tile currently being drawn
-
-    Textures textures;
-
-    Tile **sorted_tiles;
 
     const char *currently_open_world_file_path;
     uint16_t save_file_format_version;
@@ -221,35 +206,6 @@ void ViewUpdate(Camera2D *camera, float zoom_input, Vector2 zoom_target, float z
     }
 }
 
-uint32_t CreateTileTexture(Color pixels[8*8])
-{
-    Texture texture;
-    uint32_t index = 0;
-
-    if (APP->textures.free.count == 0)
-    {
-        texture = LoadTextureFromImage((Image){
-            .data = (void *)pixels,
-            .width = 8,
-            .height = 8,
-            .mipmaps = 1,
-            .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        });
-        index = APP->textures.count;
-        da_append(&APP->textures, texture);
-    }
-    else
-    {
-        assert(APP->textures.free.count < 1024);
-        index = APP->textures.free.items[APP->textures.free.count--];
-        texture = APP->textures.items[index];
-    }
-
-    UpdateTexture(texture, (void *)pixels);
-
-    return index;
-}
-
 static void CreatePixels(Tile *tile, Color pixels[8*8])
 {
     for (int i = 0; i < 8*8; ++i)
@@ -271,34 +227,16 @@ static void ConvertColorIndexesToPixels(uint8_t color_indexes[8*8], Color pixels
     }
 }
 
-static void InitTileTexture(Tile *tile)
-{
-    Color pixels[8*8];
-    ConvertColorIndexesToPixels(tile->color_indexes, pixels);
-    tile->texture_index = CreateTileTexture(pixels);
-}
-
-static Tile CreateCloneTile(Tile *src_tile)
-{
-    Tile tile = *src_tile;
-    InitTileTexture(&tile);
-    return tile;
-}
-
 static Tile CreateTile(uint8_t color_index)
 {
     assert(color_index < 4);
 
     Tile tile = {0};
-    Color pixels[8*8];
 
     for (int i = 0; i < 8*8; ++i)
     {
         tile.color_indexes[i] = color_index;
-        pixels[i] = palette_gbp[color_index];
     }
-
-    tile.texture_index = CreateTileTexture(pixels);
 
     return tile;
 }
@@ -370,20 +308,12 @@ Tile *GetTile(Tile_Set tile_set, uint32_t index)
     return &tile_set.items[index];
 }
 
-Texture GetTexture(uint32_t index)
-{
-    assert(index < APP->textures.count);
-    return APP->textures.items[index];
-}
-
 void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_index)
 {
     assert(pixel_x >= 0 && pixel_x < 8 && pixel_y >= 0 && pixel_y < 8);
     assert(color_index < 4);
 
     tile->color_indexes[pixel_y * 8 + pixel_x] = color_index;
-    Color pixel = palette_gbp[color_index];
-    UpdateTextureRec(GetTexture(tile->texture_index), (Rectangle){(float)pixel_x, (float)pixel_y, 1.0f, 1.0f}, &pixel);
 }
 
 void InitWorld(World *world, uint32_t level_width, uint32_t level_height)
@@ -418,7 +348,6 @@ void InitApp(void)
     APP->camera_world.target = (Vector2){0};
     APP->camera_world.rotation = 0.0f;
     APP->camera_world.zoom = 5.0f;
-    APP->mode = MODE_DRAW_PIXELS;
 
     APP->side_panel_width_min = 300.0f;
     APP->side_panel_width = 200.0f;
@@ -437,14 +366,17 @@ void InitApp(void)
     APP->auto_new_tile = true;
     APP->is_auto_tiling = true;
 
-    APP->textures = (Textures){0};
-
     APP->edit_tile = CreateTile(COLOR_GB_MID_DARK);
 
+    memset(&APP->canvas, 0, sizeof(APP->canvas));
     InitWorld(&APP->world, 128, 64);
-
-
-    APP->sorted_tiles = NULL;
+    APP->canvas = LoadTextureFromImage((Image){
+        .width = APP->world.level.width*8,
+        .height = APP->world.level.height*8,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+    });
+    APP->canvas_pixels = calloc(APP->canvas.width * APP->canvas.height, sizeof(*APP->canvas_pixels));
 
     APP->currently_open_world_file_path = NULL;
     APP->save_file_format_version = 0;
@@ -472,7 +404,7 @@ void DrawTileGrid(Level level)
 
     bool show_pixels = APP->camera_world.zoom > ZOOM_SHOW_PIXELS;
 
-    for (int y = 0; y < level.height * 8; ++y)
+    for (uint32_t y = 0; y < level.height * 8; ++y)
     {
         float yf = grid_start.y + y * APP->camera_world.zoom;
         Vector2 start_pos = {grid_start.x, yf};
@@ -492,7 +424,7 @@ void DrawTileGrid(Level level)
         }
     }
 
-    for (int x = 0; x < level.width * 8; ++x)
+    for (uint32_t x = 0; x < level.width * 8; ++x)
     {
         float xf = grid_start.x + x * APP->camera_world.zoom;
         Vector2 start_pos = {xf, grid_start.y};
@@ -518,14 +450,14 @@ void DrawTileIndexes(Level level)
     Vector2 grid_start = GetWorldToScreen2D((Vector2){0,0}, APP->camera_world);
 
     Font font = GetFontDefault();
-    for (int y = 0; y < level.height; ++y)
+    for (uint32_t y = 0; y < level.height; ++y)
     {
         float yf = grid_start.y + y * 8.0f * APP->camera_world.zoom;
 
-        for (int x = 0; x < level.width; ++x)
+        for (uint32_t x = 0; x < level.width; ++x)
         {
             float xf = grid_start.x + x * 8.0f * APP->camera_world.zoom;
-            int tile_index = level.tiles[y * level.width + x].index;
+            uint32_t tile_index = level.tiles[y * level.width + x].index;
             Vector2 pos = { xf + APP->camera_world.zoom * 0.2f, yf + APP->camera_world.zoom * 0.2f};
             DrawTextEx(font, TextFormat("%d", tile_index), pos, 48, 1.0f, BLACK);
         }
@@ -542,13 +474,32 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
     ClearBackground(COLOR_WORLD_BACKGROUND);
     // DrawRectangleGradientV((int)view.x, (int)view.y, (int)view.width, (int)view.height, (Color){52, 61, 89, 255}, (Color){18, 22, 42, 255});
 
+    for (uint32_t tile_y = 0; tile_y < level.height; ++tile_y)
+    {
+        for (uint32_t tile_x = 0; tile_x < level.width; ++tile_x)
+        {
+            Tile *tile = &tile_set.items[level.tiles[tile_y * level.width + tile_x].index];
+
+            for (uint32_t y = 0; y < 8; ++y)
+            {
+                for (uint32_t x = 0; x < 8; ++x)
+                {
+                    uint32_t pixel_index = (tile_y * 8 + y) * level.width * 8 + (tile_x * 8 + x);
+                    APP->canvas_pixels[pixel_index] = palette_gbp[tile->color_indexes[y * 8 + x]];
+                }
+            }
+        }
+    }
+    UpdateTexture(APP->canvas, APP->canvas_pixels);
+
     // Draw tiles
     BeginMode2D(APP->camera_world);
     {
-
-        for (int y = 0; y < level.height; ++y)
+        DrawTexture(APP->canvas, 0, 0, WHITE);
+#if 0
+        for (uint32_t y = 0; y < level.height; ++y)
         {
-            for (int x = 0; x < level.width; ++x)
+            for (uint32_t x = 0; x < level.width; ++x)
             {
                 Level_Tile level_tile = level.tiles[y * level.width + x];
                 Texture2D texture = GetTexture(tile_set.items[level_tile.index].texture_index);
@@ -563,6 +514,7 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
             Texture2D texture = GetTexture(APP->edit_tile.texture_index);
             DrawTexture(texture, edit_pos.tile_x*8, edit_pos.tile_y*8, WHITE);
         }
+#endif
     }
     EndMode2D();
 
@@ -714,12 +666,12 @@ void DrawSidePanel(Rectangle view, Tile_Set tile_set)
     for (uint32_t i = 0; i < (uint32_t)tile_set.count; ++i)
     {
         Tile *tile = &tile_set.items[i];
-        Texture2D texture = GetTexture(tile->texture_index);
+        // Texture2D texture = GetTexture(tile->texture_index);
 
         Rectangle tile_rect = GetSidePanelTileRect(view, i, props);
         Color tint = tile->ref_count ? WHITE : (Color){255, 100, 100, 255};
         if (i == hovered_tile_index) tint = BLUE;
-        DrawTexturePro(texture, (Rectangle){0,0,8,8}, tile_rect, (Vector2){0}, 0, tint);
+        // DrawTexturePro(texture, (Rectangle){0,0,8,8}, tile_rect, (Vector2){0}, 0, tint);
         if (i == APP->current_tile_idx)
         {
             float border = props.gap_min;
@@ -746,7 +698,7 @@ void CopyTile(Tile *dst, Tile *src)
         dst->color_indexes[i] = color_index;
         pixels[i] = palette_gbp[color_index];
     }
-    UpdateTexture(GetTexture(dst->texture_index), pixels);
+    // UpdateTexture(GetTexture(dst->texture_index), pixels);
 }
 
 #define INVALID_TILE_INDEX ((uint32_t)-1)
@@ -788,9 +740,7 @@ void UpdateWorldTileFromEditTile(Level *level, Tile_Set *tile_set, Level_Tile *l
         }
 
         index = (uint32_t)tile_set->count;
-        Tile tile = CreateCloneTile(&APP->edit_tile);
-
-        da_append(tile_set, tile);
+        da_append(tile_set, APP->edit_tile);
     }
 
     assert(index < tile_set->count);
@@ -1007,6 +957,7 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
 
 void DrawBrushPreview(Rectangle world_view, Tile_Set tile_set)
 {
+    UNUSED(tile_set);
     float size = 100.0f;
     Rectangle rect =
     {
@@ -1022,8 +973,8 @@ void DrawBrushPreview(Rectangle world_view, Tile_Set tile_set)
         legend = "TILE";
         if (APP->draw_solid_mask) legend = "TILE (SOLID)";
 
-        Texture texture = GetTexture(tile_set.items[APP->current_tile_idx].texture_index);
-        DrawTexturePro(texture, (Rectangle){0,0,8,8}, rect, (Vector2){0}, 0, WHITE);
+        // Texture texture = GetTexture(tile_set.items[APP->current_tile_idx].texture_index);
+        // DrawTexturePro(texture, (Rectangle){0,0,8,8}, rect, (Vector2){0}, 0, WHITE);
     }
     else if (APP->mode == MODE_DRAW_PIXELS)
     {
@@ -1376,13 +1327,11 @@ bool DeserializeWorld(World *world, Bytes *b)
         {
             case ChunkIdMake('L','E','V','L'): // Level
             {
-                // TODO: Cleanup old
                 if (!DeserializeLevel(&at, end, &world->level)) return false;
             } break;
 
             case ChunkIdMake('T','L','S','T'): // Tile Set
             {
-                // TODO: Cleanup old
                 if (!DeserializeTileSet(&at, end, &world->tile_set)) return false;
             } break;
 
@@ -1416,22 +1365,6 @@ bool LoadWorldByPath(World *world, char *load_file_path)
     if (!DeserializeWorld(world, &APP->serialization_buffer))
     {
         goto error;
-    }
-
-    // Unload old textures
-    {
-        // Skip APP->textures.items[0] since that is reserved for the edit tile
-        for (uint32_t i = 1; i < APP->textures.count; ++i)
-            UnloadTexture(APP->textures.items[i]);
-
-        APP->textures.count = 1;
-    }
-
-    // Give textures to all tiles
-    for (uint32_t i = 0; i < world->tile_set.count; ++i)
-    {
-        Tile *tile = &world->tile_set.items[i];
-        InitTileTexture(tile);
     }
 
     // Ref count new tiles
@@ -1538,6 +1471,7 @@ int main(int argc, char **argv)
         BeginDrawing();
         ClearBackground(COLOR_WINDOW_BACKGROUND);
 
+#if 1
         DrawWorldView(world_view, APP->world, mouse_pos_screen);
         DrawRectangleLinesEx(world_view, 3, COLOR_PANEL_BORDER);
 
@@ -1545,7 +1479,7 @@ int main(int argc, char **argv)
         DrawRectangleLinesEx(side_panel_view, 3, COLOR_PANEL_BORDER);
 
         DrawBrushPreview(world_view, APP->world.tile_set);
-
+#endif
         EndDrawing();
 
     }
