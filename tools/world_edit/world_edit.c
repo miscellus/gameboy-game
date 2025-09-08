@@ -35,7 +35,6 @@
 #define ZOOM_MIN_TILE_PICKER 3.0f
 
 #define INVALID_TILE_INDEX ((uint32_t)-1)
-#define EDIT_TILE_INDEX ((uint32_t)-2)
 
 typedef enum Palette_Index
 {
@@ -153,7 +152,7 @@ typedef struct App
 
     // Auto tile state
     Level_Tile *hot_auto_tile;
-    Tile edit_tile;
+    uint32_t edit_tile_index;
 
     World world;
     Color *canvas_pixels;
@@ -378,7 +377,7 @@ void InitApp(void)
     });
     APP->canvas_pixels = calloc(APP->canvas.width * APP->canvas.height, sizeof(*APP->canvas_pixels));
     APP->hot_auto_tile = NULL;
-    APP->edit_tile = (Tile){0};
+    APP->edit_tile_index = INVALID_TILE_INDEX;
 
     APP->currently_open_world_file_path = NULL;
     APP->save_file_format_version = 0;
@@ -480,9 +479,12 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
     {
         for (uint32_t tile_x = 0; tile_x < level.width; ++tile_x)
         {
-            uint32_t tile_index = level.tiles[tile_y * level.width + tile_x].index;
+            Level_Tile *level_tile = &level.tiles[tile_y * level.width + tile_x];
+            uint32_t tile_index = level_tile->index;
+            if (APP->hot_auto_tile == level_tile) tile_index = APP->edit_tile_index;
+            assert(tile_index < tile_set.count);
 
-            Tile *tile = tile_index == EDIT_TILE_INDEX ? &APP->edit_tile : &tile_set.items[tile_index];
+            Tile *tile = &tile_set.items[tile_index];
 
             for (uint32_t y = 0; y < 8; ++y)
             {
@@ -772,26 +774,33 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
     if (APP->hot_auto_tile && (has_entered_new_tile || IsMouseButtonReleased(MOUSE_BUTTON_LEFT)))
     {
-        bool using_edit_tile = APP->hot_auto_tile->index == EDIT_TILE_INDEX;
-        Tile *tile = using_edit_tile ? &APP->edit_tile : GetTile(*tile_set, APP->hot_auto_tile->index);
+        Tile *tile = GetTile(*tile_set, APP->edit_tile_index);
 
         // Deduplicate last auto tile
-        uint32_t matched_tile_index = FindTileMatch(*tile_set, tile, APP->hot_auto_tile->index);
+        uint32_t matched_tile_index = FindTileMatch(*tile_set, tile, APP->edit_tile_index);
         if (matched_tile_index != INVALID_TILE_INDEX)
         {
-            if (!using_edit_tile) tile->ref_count -= 1;
+            if (tile->ref_count == 0)
+            {
+                assert(APP->edit_tile_index == tile_set->count - 1);
+                // Remove temporary tile
+                tile_set->count -= 1;
+            }
+            else
+            {
+                tile->ref_count -= 1;
+            }
             tile = GetTile(*tile_set, matched_tile_index);
             tile->ref_count += 1;
             APP->hot_auto_tile->index = matched_tile_index;
         }
-        else if (using_edit_tile)
+        else if (APP->edit_tile_index != APP->hot_auto_tile->index)
         {
-            // The edit tile was unique, make a new tile from it.
-            tile->ref_count -= 1;
-            Tile new_tile = APP->edit_tile;
-            new_tile.ref_count = 1;
-            da_append(tile_set, new_tile);
-            APP->hot_auto_tile->index = tile_set->count - 1;
+            assert(tile->ref_count == 0);
+            assert(APP->edit_tile_index == tile_set->count - 1);
+
+            tile->ref_count = 1;
+            APP->hot_auto_tile->index = APP->edit_tile_index;
         }
 
         APP->hot_auto_tile = NULL;
@@ -799,33 +808,40 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
     {
-        uint32_t tile_index = level_tile->index;
-
         if (has_entered_new_tile || IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
         {
             APP->hot_auto_tile = level_tile;
 
             // Figure out if we can just modify the existing tile
             // or if we need to AUTOMATICALLY create a NEW TILE.
-            Tile *old_tile = GetTile(*tile_set, tile_index);
+            Tile *old_tile = GetTile(*tile_set, level_tile->index);
             assert(old_tile->ref_count > 0 && "The ref count should be > 0 since we got the tile from the level");
 
-            if (old_tile->ref_count > 1)
+            if (old_tile->ref_count == 1)
             {
+                APP->edit_tile_index = level_tile->index;
+            }
+            else
+            {
+                assert(old_tile->ref_count > 1);
+
+                // The old tile will be used one place fewer
+                old_tile->ref_count -= 1; // TODO: Should this only happen at the end of the auto tile run?
+
                 // This tile is used elsewhere, we need to clone
                 // it and modify the clone instead.
-                APP->edit_tile = *old_tile;
-                old_tile->ref_count -= 1; // The old tile will be used one place fewer
+                Tile clone = *old_tile;
 
-                // TODO USING THE EDIT TILE SHOULD BE IMPLICIT, I.e. ALWAYS USE THE EDIT TILE
-                tile_index = EDIT_TILE_INDEX;
-                level_tile->index = tile_index;
+                // Zero ref count because this tile is temporary until we have
+                // ended this auto tile run.
+                clone.ref_count = 0;
+
+                da_append(tile_set, clone);
+                APP->edit_tile_index = tile_set->count - 1;
             }
         }
 
-        Tile *tile = (tile_index == EDIT_TILE_INDEX)
-            ? &APP->edit_tile
-            : GetTile(*tile_set, tile_index);
+        Tile *tile = GetTile(*tile_set, APP->edit_tile_index);
 
         SetTilePixel(tile, pos.pixel_x, pos.pixel_y, APP->current_color_idx);
     }
