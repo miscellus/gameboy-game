@@ -774,32 +774,47 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
     if (APP->hot_auto_tile && (has_entered_new_tile || IsMouseButtonReleased(MOUSE_BUTTON_LEFT)))
     {
-        Tile *tile = GetTile(*tile_set, APP->edit_tile_index);
+        Tile *edit_tile = GetTile(*tile_set, APP->edit_tile_index);
+        Tile *old_tile = GetTile(*tile_set, APP->hot_auto_tile->index);
+
+        assert(APP->edit_tile_index != APP->hot_auto_tile->index);
+        assert(edit_tile->ref_count == 0);
+        assert(old_tile->ref_count > 0);
+        assert(APP->edit_tile_index == tile_set->count - 1);
 
         // Deduplicate last auto tile
-        uint32_t matched_tile_index = FindTileMatch(*tile_set, tile, APP->edit_tile_index);
+        uint32_t matched_tile_index = FindTileMatch(*tile_set, edit_tile, APP->edit_tile_index);
+
         if (matched_tile_index != INVALID_TILE_INDEX)
         {
-            if (tile->ref_count == 0)
-            {
-                assert(APP->edit_tile_index == tile_set->count - 1);
-                // Remove temporary tile
-                tile_set->count -= 1;
-            }
-            else
-            {
-                tile->ref_count -= 1;
-            }
-            tile = GetTile(*tile_set, matched_tile_index);
-            tile->ref_count += 1;
-            APP->hot_auto_tile->index = matched_tile_index;
-        }
-        else if (APP->edit_tile_index != APP->hot_auto_tile->index)
-        {
-            assert(tile->ref_count == 0);
-            assert(APP->edit_tile_index == tile_set->count - 1);
+            // We found a duplicate tile.
 
-            tile->ref_count = 1;
+            Tile *matched_tile = GetTile(*tile_set, matched_tile_index);
+            APP->hot_auto_tile->index = matched_tile_index;
+
+            old_tile->ref_count -= 1;
+            matched_tile->ref_count += 1;
+
+            // Remove temporary edit tile
+            tile_set->count -= 1;
+        }
+        else if (old_tile->ref_count == 1)
+        {
+            // We can reuse the old tile
+            *old_tile = *edit_tile;
+            old_tile->ref_count = 1;
+
+            // Remove temporary edit tile
+            tile_set->count -= 1;
+        }
+        else
+        {
+            // We have a unique tile and we can't just overwrite the old tile
+            // because it is used elsewhere.
+            assert(old_tile->ref_count > 1);
+
+            old_tile->ref_count -= 1;
+            edit_tile->ref_count += 1;
             APP->hot_auto_tile->index = APP->edit_tile_index;
         }
 
@@ -817,28 +832,14 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
             Tile *old_tile = GetTile(*tile_set, level_tile->index);
             assert(old_tile->ref_count > 0 && "The ref count should be > 0 since we got the tile from the level");
 
-            if (old_tile->ref_count == 1)
-            {
-                APP->edit_tile_index = level_tile->index;
-            }
-            else
-            {
-                assert(old_tile->ref_count > 1);
+            Tile clone = *old_tile;
 
-                // The old tile will be used one place fewer
-                old_tile->ref_count -= 1; // TODO: Should this only happen at the end of the auto tile run?
+            // Zero ref count because this tile is temporary until we have
+            // ended this auto tile run.
+            clone.ref_count = 0;
 
-                // This tile is used elsewhere, we need to clone
-                // it and modify the clone instead.
-                Tile clone = *old_tile;
-
-                // Zero ref count because this tile is temporary until we have
-                // ended this auto tile run.
-                clone.ref_count = 0;
-
-                da_append(tile_set, clone);
-                APP->edit_tile_index = tile_set->count - 1;
-            }
+            da_append(tile_set, clone);
+            APP->edit_tile_index = tile_set->count - 1;
         }
 
         Tile *tile = GetTile(*tile_set, APP->edit_tile_index);
