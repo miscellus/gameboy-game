@@ -35,6 +35,10 @@
 #define ZOOM_MIN_TILE_PICKER 3.0f
 
 #define INVALID_TILE_INDEX ((uint32_t)-1)
+#define INVALID_TILE_ATLAS_INDEX ((uint32_t)-1)
+
+#define TILE_ATLAS_DIM (8 * 1024)
+#define TILE_ATLAS_CAPACITY (TILE_ATLAS_DIM / 8 * TILE_ATLAS_DIM / 8)
 
 typedef enum Palette_Index
 {
@@ -150,6 +154,13 @@ typedef enum Editor_Mode
     MODE_DRAW_PIXELS,
 } Editor_Mode;
 
+typedef struct Tile_Atlas
+{
+    uint32_t *free_indexes; // Free indexes
+    uint32_t free_index_count;
+    Texture texture;
+} Tile_Atlas;
+
 typedef struct App
 {
     // View stuff
@@ -178,6 +189,8 @@ typedef struct App
     World world;
     Color *canvas_pixels;
     Texture canvas;
+
+    Tile_Atlas tile_atlas;
 
     const char *currently_open_world_file_path;
     uint16_t save_file_format_version;
@@ -362,6 +375,35 @@ void InitWorld(World *world, uint32_t level_width, uint32_t level_height)
     da_append(&world->tile_set, tile);
 }
 
+void InitTileAtlas(Tile_Atlas *tile_atlas)
+{
+    tile_atlas->free_indexes = malloc(TILE_ATLAS_CAPACITY * sizeof(*tile_atlas->free_indexes));
+    tile_atlas->free_index_count = TILE_ATLAS_CAPACITY;
+    tile_atlas->texture = LoadTextureFromImage((Image){
+        .width = TILE_ATLAS_DIM,
+        .height = TILE_ATLAS_DIM,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
+    });
+
+    for (uint32_t i = 0; i < TILE_ATLAS_CAPACITY; ++i)
+    {
+        tile_atlas->free_indexes[i] = i;
+    }
+}
+
+uint32_t GetNewTileAtlasIndex(Tile_Atlas *tile_atlas)
+{
+    if (tile_atlas->free_index_count == 0)
+    {
+        return INVALID_TILE_ATLAS_INDEX;
+    }
+
+    uint32_t index = tile_atlas->free_indexes[--tile_atlas->free_index_count];
+    assert(index < TILE_ATLAS_CAPACITY);
+    return (uint32_t)index;
+}
+
 void InitApp(void)
 {
     APP = malloc(sizeof(*APP));
@@ -397,11 +439,24 @@ void InitApp(void)
         .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
     });
     APP->canvas_pixels = calloc(APP->canvas.width * APP->canvas.height, sizeof(*APP->canvas_pixels));
+
+    InitTileAtlas(&APP->tile_atlas);
+
     APP->hot_auto_tile = NULL;
 
     APP->currently_open_world_file_path = NULL;
     APP->save_file_format_version = 0;
     APP->serialization_buffer = (Bytes){0};
+}
+
+Rectangle TileAtlasIndexToRect(uint32_t index)
+{
+    assert(index < TILE_ATLAS_CAPACITY);
+    uint32_t tile_x = index % (TILE_ATLAS_DIM / 8);
+    uint32_t tile_y = index / (TILE_ATLAS_DIM / 8);
+    float x = tile_x * 8.0f;
+    float y = tile_y * 8.0f;
+    return (Rectangle){x, y, 8.0f, 8.0f};
 }
 
 Rectangle CutRectGetTop(Rectangle r, float s) { r.height = s; return r; }
