@@ -265,6 +265,8 @@ static void FillTile(Tile *tile, uint8_t color_index)
     {
         tile->color_indexes[i] = color_index;
     }
+
+    tile->texture_needs_update = true;
 }
 
 Tile_GB TileToGB(Tile *tile)
@@ -387,13 +389,10 @@ Tile CreateTile(Tile_Atlas *atlas)
     return tile;
 }
 
-Tile CreateTileClone(Tile *src_tile, Tile_Atlas *tile_atlas)
+void CopyTilePixels(Tile *dst_tile, Tile *src_tile)
 {
-    Tile clone = *src_tile;
-    clone.tile_atlas_index = GetNewTileAtlasIndex(tile_atlas);
-    clone.texture_needs_update = true;
-    clone.ref_count = 0;
-    return clone;
+    memcpy(&dst_tile->color_indexes, &src_tile->color_indexes, 8*8*sizeof(*src_tile->color_indexes));
+    dst_tile->texture_needs_update = true;
 }
 
 void DeleteLastTile(Tile_Set *tile_set, Tile_Atlas *tile_atlas)
@@ -577,6 +576,7 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
     ClearBackground(COLOR_WORLD_BACKGROUND);
     // DrawRectangleGradientV((int)view.x, (int)view.y, (int)view.width, (int)view.height, (Color){52, 61, 89, 255}, (Color){18, 22, 42, 255});
 
+#if 0
     for (uint32_t tile_y = 0; tile_y < level.height; ++tile_y)
     {
         for (uint32_t tile_x = 0; tile_x < level.width; ++tile_x)
@@ -586,7 +586,7 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
             if (APP->hot_auto_tile == level_tile) tile_index = GetEditTileIndex(&tile_set);
             assert(tile_index < tile_set.count);
 
-            Tile *tile = &tile_set.items[tile_index];
+            Tile *tile = GetTile(tile_set, tile_index);
 
             for (uint32_t y = 0; y < 8; ++y)
             {
@@ -599,12 +599,32 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
         }
     }
     UpdateTexture(APP->canvas, APP->canvas_pixels);
+#endif
 
     // Draw tiles
     BeginMode2D(APP->camera_world);
     {
-        DrawTexture(APP->canvas, 0, 0, WHITE);
-#if 0
+        // DrawTexture(APP->canvas, 0, 0, WHITE);
+        // DrawTexture(APP->tile_atlas.texture, 0, 0, WHITE);
+#if 1
+        for (uint32_t tile_y = 0; tile_y < level.height; ++tile_y)
+        {
+            for (uint32_t tile_x = 0; tile_x < level.width; ++tile_x)
+            {
+                Level_Tile *level_tile = &level.tiles[tile_y * level.width + tile_x];
+                uint32_t tile_index = level_tile->index;
+                if (APP->hot_auto_tile == level_tile) tile_index = GetEditTileIndex(&tile_set);
+                assert(tile_index < tile_set.count);
+
+                Tile *tile = GetTile(tile_set, tile_index);
+
+                Rectangle tile_rect = {tile_x*8.0f, tile_y*8.0f, 8.0f, 8.0f};
+                Rectangle rec = TileAtlasIndexToRect(tile->tile_atlas_index);
+                DrawTexturePro(APP->tile_atlas.texture, rec, tile_rect, (Vector2){0}, 0, WHITE);
+            }
+        }
+
+#else
         for (uint32_t y = 0; y < level.height; ++y)
         {
             for (uint32_t x = 0; x < level.width; ++x)
@@ -871,7 +891,8 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
         else if (old_tile->ref_count == 1)
         {
             // We can reuse the old tile
-            *old_tile = *edit_tile;
+
+            CopyTilePixels(old_tile, edit_tile);
             old_tile->ref_count = 1;
 
             // Remove temporary edit tile
@@ -902,7 +923,8 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
             Tile *old_tile = GetTile(*tile_set, level_tile->index);
             assert(old_tile->ref_count > 0 && "The ref count should be > 0 since we got the tile from the level");
 
-            Tile clone = CreateTileClone(old_tile, &APP->tile_atlas);
+            Tile clone = CreateTile(&APP->tile_atlas);
+            CopyTilePixels(&clone, old_tile);
 
             da_append(tile_set, clone);
             edit_tile_index = GetEditTileIndex(tile_set);
@@ -1010,7 +1032,11 @@ void UpdateTileTextures(Tile_Set tile_set)
         Tile *tile = GetTile(tile_set, i);
         if (!tile->texture_needs_update) continue;
 
+        tile->texture_needs_update = false;
+
         Rectangle rec = TileAtlasIndexToRect(tile->tile_atlas_index);
+
+        printf("%u => {%.2f, %.2f}\n", tile->tile_atlas_index, rec.x, rec.y);
         Color *pixels = ConvertColorIndexesToPixels(tile->color_indexes);
         UpdateTextureRec(APP->tile_atlas.texture, rec, (const void *)pixels);
     }
