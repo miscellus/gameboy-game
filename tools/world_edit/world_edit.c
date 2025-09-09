@@ -94,8 +94,9 @@ typedef union Tile_GB
 typedef struct Tile
 {
     uint8_t color_indexes[8*8]; // NOTE(jkk): In range 0-3
-    uint32_t texture_index;
     uint32_t ref_count;
+    uint32_t tile_atlas_index;
+    bool texture_needs_update;
 } Tile;
 
 typedef struct Tile_Set
@@ -242,39 +243,28 @@ void ViewUpdate(Camera2D *camera, float zoom_input, Vector2 zoom_target, float z
     }
 }
 
-static void CreatePixels(Tile *tile, Color pixels[8*8])
+static Color* ConvertColorIndexesToPixels(uint8_t color_indexes[8*8])
 {
-    for (int i = 0; i < 8*8; ++i)
-    {
-        uint8_t color_index = tile->color_indexes[i];
-        assert(color_index < 4);
-        tile->color_indexes[i] = color_index;
-        pixels[i] = palette_gbp[color_index];
-    }
-}
+    static Color pixels[8*8];
 
-static void ConvertColorIndexesToPixels(uint8_t color_indexes[8*8], Color pixels[8*8])
-{
     for (int i = 0; i < 8*8; ++i)
     {
         uint8_t color_index = color_indexes[i];
         assert(color_index < 4);
         pixels[i] = palette_gbp[color_index];
     }
+
+    return pixels;
 }
 
-static Tile CreateTile(uint8_t color_index)
+static void FillTile(Tile *tile, uint8_t color_index)
 {
     assert(color_index < 4);
 
-    Tile tile = {0};
-
-    for (int i = 0; i < 8*8; ++i)
+    for (uint32_t i = 0; i < 8*8; ++i)
     {
-        tile.color_indexes[i] = color_index;
+        tile->color_indexes[i] = color_index;
     }
-
-    return tile;
 }
 
 Tile_GB TileToGB(Tile *tile)
@@ -350,29 +340,7 @@ void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_in
     assert(color_index < 4);
 
     tile->color_indexes[pixel_y * 8 + pixel_x] = color_index;
-}
-
-void InitWorld(World *world, uint32_t level_width, uint32_t level_height)
-{
-    world->level.width = level_width;
-    world->level.height = level_height;
-    size_t num_tiles = world->level.width * world->level.height;
-    world->level.tiles = malloc(num_tiles*sizeof(*world->level.tiles));
-    memset(world->level.tiles, 0xcd, num_tiles*sizeof(*world->level.tiles));
-
-    world->tile_set.capacity = 0;
-    world->tile_set.count = 0;
-    world->tile_set.items = NULL;
-
-    for (size_t i = 0; i < num_tiles; ++i)
-    {
-        world->level.tiles[i].index = 0;
-        world->level.tiles[i].is_solid = 0;
-    }
-
-    Tile tile = CreateTile(COLOR_GB_LIGHT);
-    tile.ref_count = (uint32_t)num_tiles;
-    da_append(&world->tile_set, tile);
+    tile->texture_needs_update = true;
 }
 
 void InitTileAtlas(Tile_Atlas *tile_atlas)
@@ -394,6 +362,7 @@ void InitTileAtlas(Tile_Atlas *tile_atlas)
 
 uint32_t GetNewTileAtlasIndex(Tile_Atlas *tile_atlas)
 {
+    assert(tile_atlas->free_index_count <= TILE_ATLAS_CAPACITY);
     if (tile_atlas->free_index_count == 0)
     {
         return INVALID_TILE_ATLAS_INDEX;
@@ -402,6 +371,59 @@ uint32_t GetNewTileAtlasIndex(Tile_Atlas *tile_atlas)
     uint32_t index = tile_atlas->free_indexes[--tile_atlas->free_index_count];
     assert(index < TILE_ATLAS_CAPACITY);
     return (uint32_t)index;
+}
+
+void FreeTileAtlasIndex(Tile_Atlas *tile_atlas, uint32_t index)
+{
+    assert(index < TILE_ATLAS_CAPACITY);
+    tile_atlas->free_indexes[tile_atlas->free_index_count++] = index;
+}
+
+Tile CreateTile(Tile_Atlas *atlas)
+{
+    Tile tile = {0};
+    tile.tile_atlas_index = GetNewTileAtlasIndex(atlas);
+    tile.texture_needs_update = true;
+    return tile;
+}
+
+Tile CreateTileClone(Tile *src_tile, Tile_Atlas *tile_atlas)
+{
+    Tile clone = *src_tile;
+    clone.tile_atlas_index = GetNewTileAtlasIndex(tile_atlas);
+    clone.texture_needs_update = true;
+    clone.ref_count = 0;
+    return clone;
+}
+
+void DeleteLastTile(Tile_Set *tile_set, Tile_Atlas *tile_atlas)
+{
+    Tile deleted_tile = tile_set->items[--tile_set->count];
+    FreeTileAtlasIndex(tile_atlas, deleted_tile.tile_atlas_index);
+}
+
+void InitWorld(World *world, uint32_t level_width, uint32_t level_height)
+{
+    world->level.width = level_width;
+    world->level.height = level_height;
+    size_t num_tiles = world->level.width * world->level.height;
+    world->level.tiles = malloc(num_tiles*sizeof(*world->level.tiles));
+    memset(world->level.tiles, 0xcd, num_tiles*sizeof(*world->level.tiles));
+
+    world->tile_set.capacity = 0;
+    world->tile_set.count = 0;
+    world->tile_set.items = NULL;
+
+    for (size_t i = 0; i < num_tiles; ++i)
+    {
+        world->level.tiles[i].index = 0;
+        world->level.tiles[i].is_solid = 0;
+    }
+
+    Tile tile = CreateTile(&APP->tile_atlas);
+    FillTile(&tile, COLOR_GB_LIGHT);
+    tile.ref_count = (uint32_t)num_tiles;
+    da_append(&world->tile_set, tile);
 }
 
 void InitApp(void)
@@ -430,6 +452,8 @@ void InitApp(void)
     APP->show_tile_indexes = false;
     APP->auto_new_tile = true;
 
+    InitTileAtlas(&APP->tile_atlas);
+
     memset(&APP->canvas, 0, sizeof(APP->canvas));
     InitWorld(&APP->world, 128, 64);
     APP->canvas = LoadTextureFromImage((Image){
@@ -439,8 +463,6 @@ void InitApp(void)
         .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
     });
     APP->canvas_pixels = calloc(APP->canvas.width * APP->canvas.height, sizeof(*APP->canvas_pixels));
-
-    InitTileAtlas(&APP->tile_atlas);
 
     APP->hot_auto_tile = NULL;
 
@@ -757,7 +779,11 @@ void DrawSidePanel(Rectangle view, Tile_Set tile_set)
         Rectangle tile_rect = GetSidePanelTileRect(view, i, props);
         Color tint = tile->ref_count ? WHITE : (Color){255, 100, 100, 255};
         if (i == hovered_tile_index) tint = BLUE;
-        // DrawTexturePro(texture, (Rectangle){0,0,8,8}, tile_rect, (Vector2){0}, 0, tint);
+
+        Rectangle rec = TileAtlasIndexToRect(tile->tile_atlas_index);
+
+        DrawTexturePro(APP->tile_atlas.texture, rec, tile_rect, (Vector2){0}, 0, tint);
+
         if (i == APP->current_tile_idx)
         {
             float border = props.gap_min;
@@ -849,7 +875,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
             old_tile->ref_count = 1;
 
             // Remove temporary edit tile
-            tile_set->count -= 1;
+            DeleteLastTile(tile_set, &APP->tile_atlas);
         }
         else
         {
@@ -876,11 +902,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
             Tile *old_tile = GetTile(*tile_set, level_tile->index);
             assert(old_tile->ref_count > 0 && "The ref count should be > 0 since we got the tile from the level");
 
-            Tile clone = *old_tile;
-
-            // Zero ref count because this tile is temporary until we have
-            // ended this auto tile run.
-            clone.ref_count = 0;
+            Tile clone = CreateTileClone(old_tile, &APP->tile_atlas);
 
             da_append(tile_set, clone);
             edit_tile_index = GetEditTileIndex(tile_set);
@@ -979,6 +1001,19 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
         TODO("Unimplemented app mode");
     }
 
+}
+
+void UpdateTileTextures(Tile_Set tile_set)
+{
+    for (uint32_t i = 0; i < tile_set.count; ++i)
+    {
+        Tile *tile = GetTile(tile_set, i);
+        if (!tile->texture_needs_update) continue;
+
+        Rectangle rec = TileAtlasIndexToRect(tile->tile_atlas_index);
+        Color *pixels = ConvertColorIndexesToPixels(tile->color_indexes);
+        UpdateTextureRec(APP->tile_atlas.texture, rec, (const void *)pixels);
+    }
 }
 
 void DeleteTile(uint32_t tile_index, Tile_Set *tile_set, World *world)
@@ -1576,6 +1611,8 @@ int main(int argc, char **argv)
             UpdateSidePanelView(side_panel_view, mouse_scroll, APP->world.tile_set);
 
         APP->mouse_previous = mouse_pos_screen;
+
+        UpdateTileTextures(APP->world.tile_set);
 
         ///////////////////////////
         //                       //
