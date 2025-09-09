@@ -961,6 +961,9 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
                     hist.level_tile_delta.index ^= APP->current_tile_index;
                     hist.tile_index = INVALID_TILE_INDEX;
                     hist.transaction_id = APP->history.next_transaction_id++;
+                    assert(APP->history.undo_count <= APP->history.count);
+                    APP->history.count -= APP->history.undo_count;
+                    APP->history.undo_count = 0;
                     da_append(&APP->history, hist);
 
 
