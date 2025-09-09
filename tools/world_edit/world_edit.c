@@ -1036,7 +1036,6 @@ void UpdateTileTextures(Tile_Set tile_set)
 
         Rectangle rec = TileAtlasIndexToRect(tile->tile_atlas_index);
 
-        printf("%u => {%.2f, %.2f}\n", tile->tile_atlas_index, rec.x, rec.y);
         Color *pixels = ConvertColorIndexesToPixels(tile->color_indexes);
         UpdateTextureRec(APP->tile_atlas.texture, rec, (const void *)pixels);
     }
