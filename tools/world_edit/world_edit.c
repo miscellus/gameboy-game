@@ -182,6 +182,7 @@ typedef struct App
     bool hide_grid;
     bool show_tile_indexes;
     bool auto_new_tile;
+    bool show_game_boy_screen;
 
     // Auto tile state
     Level_Tile *hot_auto_tile;
@@ -454,6 +455,7 @@ void InitApp(void)
     APP->mode = MODE_DRAW_PIXELS;
     APP->current_is_solid = false;
     APP->hide_grid = false;
+    APP->show_game_boy_screen = false;
     APP->show_tile_indexes = false;
     APP->auto_new_tile = true;
 
@@ -598,6 +600,19 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
 
         // Uncomment for debugging the tile_atlas texture:
         // DrawTexture(APP->tile_atlas.texture, 0, 0, WHITE);
+
+        if (APP->show_game_boy_screen)
+        {
+            float game_boy_screen_width = 160;
+            float game_boy_screen_height = 144;
+            Rectangle game_boy_screen_rect = {
+                mouse_pos_world.x - game_boy_screen_width/2,
+                mouse_pos_world.y - game_boy_screen_height/2,
+                game_boy_screen_width,
+                game_boy_screen_height,
+            };
+            DrawRectangleLinesEx(game_boy_screen_rect, 8, BLACK);
+        }
     }
     EndMode2D();
 
@@ -971,7 +986,11 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
     }
     ViewUpdate(&APP->camera_world, mouse_scroll, mouse_pos_screen, ZOOM_MIN, ZOOM_MAX, mouse_delta);
 
-    if (IsKeyPressed(KEY_G))  APP->hide_grid = !APP->hide_grid;
+    KeyModifiers modifiers = GetKeyModifiers();
+
+    if (IsKeyPressed(KEY_G) && !modifiers.shift) APP->hide_grid ^= 1;
+    if (IsKeyPressed(KEY_G) && modifiers.shift) APP->show_game_boy_screen ^= 1;
+
     if (IsKeyPressed(KEY_I))  APP->show_tile_indexes = !APP->show_tile_indexes;
 
 
