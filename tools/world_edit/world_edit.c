@@ -130,13 +130,12 @@ typedef struct World
 typedef struct History_Entry
 {
     Tile_Set *tile_set;
+    Tile_GB tile_delta;
+    uint32_t tile_index;
 
     // If != NULL, then what happended was level_tile->index += tile_index_delta
     Level_Tile *level_tile;
-    int32_t tile_index_delta;
-
-    Tile_GB tile_delta;
-    uint32_t tile_index;
+    Level_Tile level_tile_delta;
 
     uint32_t transaction_id;
 } History_Entry;
@@ -146,6 +145,7 @@ typedef struct History
     History_Entry *items;
     uint32_t count;
     uint32_t capacity;
+    uint32_t undo_count;
     uint32_t next_transaction_id;
 } History;
 
@@ -173,13 +173,12 @@ typedef struct App
     float side_panel_scroll_offset;
 
     Vector2 mouse_previous;
-    uint8_t current_color_idx; // NOTE(jkk): In range 0-3
-    uint32_t current_tile_idx;
-    bool current_is_solid;
+    uint8_t current_color_index; // NOTE(jkk): In range 0-3
+    uint32_t current_tile_index;
 
     // Mode stuff
     Editor_Mode mode;
-    bool draw_solid_mask;
+    bool current_is_solid;
     bool hide_grid;
     bool show_tile_indexes;
     bool auto_new_tile;
@@ -448,12 +447,12 @@ void InitApp(void)
     APP->side_panel_scroll_offset = 0.0f;
 
     APP->mouse_previous = (Vector2){0.0f};
-    APP->current_color_idx = 0; // NOTE(jkk): In range 0-3
-    APP->current_tile_idx = 0;
+    APP->current_color_index = 0; // NOTE(jkk): In range 0-3
+    APP->current_tile_index = 0;
     APP->current_is_solid = false;
 
     APP->mode = MODE_DRAW_PIXELS;
-    APP->draw_solid_mask = false;
+    APP->current_is_solid = false;
     APP->hide_grid = false;
     APP->show_tile_indexes = false;
     APP->auto_new_tile = true;
@@ -610,7 +609,7 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
             Vector2 pixel_rect_min_world = (Vector2) {floorf(mouse_pos_world.x), floorf(mouse_pos_world.y)};
             Vector2 pixel_rect_min = GetWorldToScreen2D(pixel_rect_min_world, APP->camera_world);
 
-            Color draw_color = palette_gbp[APP->current_color_idx];
+            Color draw_color = palette_gbp[APP->current_color_index];
             Rectangle pixel_rect = {
                 .x = pixel_rect_min.x,
                 .y = pixel_rect_min.y,
@@ -627,7 +626,7 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
         Vector2 rect_min = GetWorldToScreen2D(rect_min_world, APP->camera_world);
         Rectangle tile_rect = {rect_min.x, rect_min.y, 8*APP->camera_world.zoom, 8*APP->camera_world.zoom};
 
-        if (APP->draw_solid_mask)
+        if (APP->current_is_solid)
         {
             if (APP->current_is_solid) DrawRectangleRec(tile_rect, COLOR_SOLID_BRUSH);
             DrawRectangleLinesEx(tile_rect, 3, BLACK);
@@ -760,7 +759,7 @@ void DrawSidePanel(Rectangle view, Tile_Set tile_set)
 
         DrawTexturePro(APP->tile_atlas.texture, rec, tile_rect, (Vector2){0}, 0, tint);
 
-        if (i == APP->current_tile_idx)
+        if (i == APP->current_tile_index)
         {
             float border = props.gap_min;
             Rectangle border_rect = PadRect(tile_rect, -border);
@@ -888,7 +887,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
         Tile *tile = GetTile(*tile_set, edit_tile_index);
 
-        SetTilePixel(tile, pos.pixel_x, pos.pixel_y, APP->current_color_idx);
+        SetTilePixel(tile, pos.pixel_x, pos.pixel_y, APP->current_color_index);
     }
 }
 
@@ -900,7 +899,7 @@ void ModeDrawPixels(Vector2 mouse_pos_world, Level *level, Tile_Set *tile_set)
     Level_Tile *level_tile = LevelGetTile(*level, pos.tile_x, pos.tile_y);
     if (!level_tile) return;
 
-    SetTilePixel(GetTile(*tile_set, level_tile->index), pos.pixel_x, pos.pixel_y, APP->current_color_idx);
+    SetTilePixel(GetTile(*tile_set, level_tile->index), pos.pixel_x, pos.pixel_y, APP->current_color_index);
 }
 
 void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_scroll, Level *level, Tile_Set *tile_set)
@@ -918,10 +917,10 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
 
     if (APP->mode == MODE_DRAW_PIXELS)
     {
-        if (IsKeyPressed(KEY_ONE)) APP->current_color_idx = COLOR_GB_DARK;
-        if (IsKeyPressed(KEY_TWO)) APP->current_color_idx = COLOR_GB_MID_DARK;
-        if (IsKeyPressed(KEY_THREE)) APP->current_color_idx = COLOR_GB_MID_LIGHT;
-        if (IsKeyPressed(KEY_FOUR)) APP->current_color_idx = COLOR_GB_LIGHT;
+        if (IsKeyPressed(KEY_ONE)) APP->current_color_index = COLOR_GB_DARK;
+        if (IsKeyPressed(KEY_TWO)) APP->current_color_index = COLOR_GB_MID_DARK;
+        if (IsKeyPressed(KEY_THREE)) APP->current_color_index = COLOR_GB_MID_LIGHT;
+        if (IsKeyPressed(KEY_FOUR)) APP->current_color_index = COLOR_GB_LIGHT;
 
         if (APP->auto_new_tile)
         {
@@ -934,20 +933,14 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
     }
     else if (APP->mode == MODE_DRAW_TILES)
     {
-        if (APP->draw_solid_mask)
-        {
-            if (IsKeyPressed(KEY_ONE)) APP->current_is_solid = false;
-            if (IsKeyPressed(KEY_TWO)) APP->current_is_solid = true;
-        }
-
         if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
         {
             int change = -!!IsKeyPressed(KEY_UP) + !!IsKeyPressed(KEY_DOWN);
             if (change)
             {
-                APP->current_tile_idx += change;
-                if (APP->current_tile_idx < 0) APP->current_tile_idx = 0;
-                else if (APP->current_tile_idx > tile_set->count - 1) APP->current_tile_idx = (uint32_t)tile_set->count - 1;
+                APP->current_tile_index += change;
+                if (APP->current_tile_index < 0) APP->current_tile_index = 0;
+                else if (APP->current_tile_index > tile_set->count - 1) APP->current_tile_index = (uint32_t)tile_set->count - 1;
             }
         }
 
@@ -957,18 +950,24 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
             Level_Tile *level_tile = LevelGetTile(*level, pos.tile_x, pos.tile_y);
             if (level_tile)
             {
-                if (APP->draw_solid_mask)
+                Tile *old_tile = GetTile(*tile_set, level_tile->index);
+                Tile *new_tile = GetTile(*tile_set, APP->current_tile_index);
+                if (old_tile != new_tile || level_tile->is_solid != APP->current_is_solid)
                 {
+                    History_Entry hist = {0};
+                    hist.level_tile = level_tile;
+                    hist.level_tile_delta = *level_tile;
+                    hist.level_tile_delta.is_solid ^= APP->current_is_solid;
+                    hist.level_tile_delta.index ^= APP->current_tile_index;
+                    hist.tile_index = INVALID_TILE_INDEX;
+                    hist.transaction_id = APP->history.next_transaction_id++;
+                    da_append(&APP->history, hist);
+
+
+                    level_tile->index = APP->current_tile_index;
                     level_tile->is_solid = APP->current_is_solid;
-                }
-                else
-                {
-                    Tile *old_tile = GetTile(*tile_set, level_tile->index);
+
                     --old_tile->ref_count;
-
-                    level_tile->index = APP->current_tile_idx;
-
-                    Tile *new_tile = GetTile(*tile_set, level_tile->index);
                     ++new_tile->ref_count;
                 }
             }
@@ -1069,7 +1068,7 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
         int32_t tile_index = SidePanelGetHoveredTileIndex(view, GetMousePosition(), p);
         if (tile_index >= 0)
         {
-            APP->current_tile_idx = tile_index;
+            APP->current_tile_index = tile_index;
         }
     }
 
@@ -1077,10 +1076,10 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
     {
         if (modifiers.shift)
         {
-            DeleteTile(APP->current_tile_idx, &APP->world.tile_set, &APP->world);
-            if (APP->current_tile_idx > APP->world.tile_set.count - 1)
+            DeleteTile(APP->current_tile_index, &APP->world.tile_set, &APP->world);
+            if (APP->current_tile_index > APP->world.tile_set.count - 1)
             {
-                APP->current_tile_idx = APP->world.tile_set.count - 1;
+                APP->current_tile_index = APP->world.tile_set.count - 1;
             }
         }
     }
@@ -1102,16 +1101,16 @@ void DrawBrushPreview(Rectangle world_view, Tile_Set tile_set)
     if (APP->mode == MODE_DRAW_TILES)
     {
         legend = "TILE";
-        if (APP->draw_solid_mask) legend = "TILE (SOLID)";
+        if (APP->current_is_solid) legend = "TILE (SOLID)";
 
-        // Texture texture = GetTexture(tile_set.items[APP->current_tile_idx].texture_index);
+        // Texture texture = GetTexture(tile_set.items[APP->current_tile_index].texture_index);
         // DrawTexturePro(texture, (Rectangle){0,0,8,8}, rect, (Vector2){0}, 0, WHITE);
     }
     else if (APP->mode == MODE_DRAW_PIXELS)
     {
         legend = "PIXEL";
         if (APP->auto_new_tile) legend = "PIXEL (AUTO TILE)";
-        DrawRectangleRec(rect, palette_gbp[APP->current_color_idx]);
+        DrawRectangleRec(rect, palette_gbp[APP->current_color_index]);
     }
 
     DrawRectangleLinesEx(rect, 3, BLACK);
@@ -1536,6 +1535,52 @@ bool LoadWorld(World *world)
     return LoadWorldByPath(world, load_file_path);
 }
 
+void Undo()
+{
+    // Remember: we are going from NEW to OLD, because it is undo
+
+    History *history = &APP->history;
+    assert(history->undo_count <= history->count);
+    if (history->count - history->undo_count == 0) return;
+
+    history->undo_count += 1;
+    History_Entry hist = history->items[history->count - history->undo_count];
+
+    if (hist.level_tile)
+    {
+        Tile *new_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+        hist.level_tile->index ^= hist.level_tile_delta.index;
+        hist.level_tile->is_solid ^= hist.level_tile_delta.is_solid;
+        Tile *old_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+
+        new_tile->ref_count -= 1;
+        old_tile->ref_count += 1;
+    }
+}
+
+void Redo()
+{
+    // Remember: we are going from NEW to OLD, because it is undo
+
+    History *history = &APP->history;
+    assert(history->undo_count <= history->count);
+    if (history->undo_count == 0) return;
+
+    History_Entry hist = history->items[history->count - history->undo_count];
+    history->undo_count -= 1;
+
+    if (hist.level_tile)
+    {
+        Tile *new_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+        hist.level_tile->index ^= hist.level_tile_delta.index;
+        hist.level_tile->is_solid ^= hist.level_tile_delta.is_solid;
+        Tile *old_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+
+        new_tile->ref_count += 1;
+        old_tile->ref_count -= 1;
+    }
+}
+
 void GlobalShortcuts(void)
 {
     KeyModifiers modifiers = GetKeyModifiers();
@@ -1550,7 +1595,7 @@ void GlobalShortcuts(void)
     {
         if (modifiers.shift)
         {
-            APP->draw_solid_mask ^= APP->mode == MODE_DRAW_TILES;
+            APP->current_is_solid ^= APP->mode == MODE_DRAW_TILES;
             APP->auto_new_tile ^= APP->mode == MODE_DRAW_PIXELS;
         }
         else
@@ -1566,6 +1611,9 @@ void GlobalShortcuts(void)
 
     if (modifiers.ctrl && IsKeyPressed(KEY_S)) SaveWorld(modifiers.shift, APP->world.level, APP->world.tile_set);
     if (modifiers.ctrl && IsKeyPressed(KEY_O)) LoadWorld(&APP->world);
+
+    if (modifiers.ctrl && !modifiers.shift && IsKeyPressed(KEY_Z)) Undo();
+    if (modifiers.ctrl && IsKeyPressed(KEY_Y) || (modifiers.shift && IsKeyPressed(KEY_Z))) Redo();
 }
 
 int main(int argc, char **argv)
