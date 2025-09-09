@@ -191,6 +191,8 @@ typedef struct App
 
     Tile_Atlas tile_atlas;
 
+    History history;
+
     const char *currently_open_world_file_path;
     uint16_t save_file_format_version;
     Bytes serialization_buffer;
@@ -241,6 +243,46 @@ void ViewUpdate(Camera2D *camera, float zoom_input, Vector2 zoom_target, float z
     }
 }
 
+void ResetTileAtlas(Tile_Atlas *tile_atlas)
+{
+    tile_atlas->free_index_count = TILE_ATLAS_CAPACITY;
+    for (uint32_t i = 0; i < TILE_ATLAS_CAPACITY; ++i)
+    {
+        tile_atlas->free_indexes[i] = i;
+    }
+}
+
+void InitTileAtlas(Tile_Atlas *tile_atlas)
+{
+    tile_atlas->free_indexes = malloc(TILE_ATLAS_CAPACITY * sizeof(*tile_atlas->free_indexes));
+    tile_atlas->texture = LoadTextureFromImage((Image){
+        .width = TILE_ATLAS_DIM,
+        .height = TILE_ATLAS_DIM,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
+    });
+    ResetTileAtlas(tile_atlas);
+}
+
+uint32_t GetNewTileAtlasIndex(Tile_Atlas *tile_atlas)
+{
+    assert(tile_atlas->free_index_count <= TILE_ATLAS_CAPACITY);
+    if (tile_atlas->free_index_count == 0)
+    {
+        return INVALID_TILE_ATLAS_INDEX;
+    }
+
+    uint32_t index = tile_atlas->free_indexes[--tile_atlas->free_index_count];
+    assert(index < TILE_ATLAS_CAPACITY);
+    return (uint32_t)index;
+}
+
+void FreeTileAtlasIndex(Tile_Atlas *tile_atlas, uint32_t index)
+{
+    assert(index < TILE_ATLAS_CAPACITY);
+    tile_atlas->free_indexes[tile_atlas->free_index_count++] = index;
+}
+
 static Color* ConvertColorIndexesToPixels(uint8_t color_indexes[8*8])
 {
     static Color pixels[8*8];
@@ -284,7 +326,7 @@ Tile_GB TileToGB(Tile *tile)
     return tile_gb;
 }
 
-Tile TileFromGB(Tile_GB tile_gb)
+Tile TileFromGB(Tile_GB tile_gb, Tile_Atlas *tile_atlas)
 {
     Tile tile = {0};
 
@@ -298,6 +340,9 @@ Tile TileFromGB(Tile_GB tile_gb)
             tile.color_indexes[8 * y + x] = pixel;
         }
     }
+
+    tile.texture_needs_update = true;
+    tile.tile_atlas_index = GetNewTileAtlasIndex(tile_atlas);
 
     return tile;
 }
@@ -341,42 +386,6 @@ void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_in
 
     tile->color_indexes[pixel_y * 8 + pixel_x] = color_index;
     tile->texture_needs_update = true;
-}
-
-void InitTileAtlas(Tile_Atlas *tile_atlas)
-{
-    tile_atlas->free_indexes = malloc(TILE_ATLAS_CAPACITY * sizeof(*tile_atlas->free_indexes));
-    tile_atlas->free_index_count = TILE_ATLAS_CAPACITY;
-    tile_atlas->texture = LoadTextureFromImage((Image){
-        .width = TILE_ATLAS_DIM,
-        .height = TILE_ATLAS_DIM,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
-    });
-
-    for (uint32_t i = 0; i < TILE_ATLAS_CAPACITY; ++i)
-    {
-        tile_atlas->free_indexes[i] = i;
-    }
-}
-
-uint32_t GetNewTileAtlasIndex(Tile_Atlas *tile_atlas)
-{
-    assert(tile_atlas->free_index_count <= TILE_ATLAS_CAPACITY);
-    if (tile_atlas->free_index_count == 0)
-    {
-        return INVALID_TILE_ATLAS_INDEX;
-    }
-
-    uint32_t index = tile_atlas->free_indexes[--tile_atlas->free_index_count];
-    assert(index < TILE_ATLAS_CAPACITY);
-    return (uint32_t)index;
-}
-
-void FreeTileAtlasIndex(Tile_Atlas *tile_atlas, uint32_t index)
-{
-    assert(index < TILE_ATLAS_CAPACITY);
-    tile_atlas->free_indexes[tile_atlas->free_index_count++] = index;
 }
 
 Tile CreateTile(Tile_Atlas *atlas)
@@ -452,6 +461,8 @@ void InitApp(void)
     InitTileAtlas(&APP->tile_atlas);
 
     InitWorld(&APP->world, 128, 64);
+
+    APP->history = (History){0};
 
     APP->hot_auto_tile = NULL;
 
@@ -1414,7 +1425,7 @@ bool DeserializeTileSet(uint8_t **at, uint8_t *end, Tile_Set *tile_set)
     for (uint16_t i = 0; i < tile_count; ++i, *at += sizeof(Tile_GB))
     {
         Tile_GB tile_gb = *(Tile_GB *)(*at);
-        Tile tile = TileFromGB(tile_gb);
+        Tile tile = TileFromGB(tile_gb, &APP->tile_atlas);
         tile_set->items[i] = tile;
     }
 
@@ -1465,6 +1476,12 @@ bool DeserializeWorld(World *world, Bytes *b)
     return true;
 }
 
+void FreeWorld(World *world)
+{
+    world->tile_set.count = 0;
+    ResetTileAtlas(&APP->tile_atlas);
+}
+
 bool LoadWorldByPath(World *world, char *load_file_path)
 {
     if (load_file_path == NULL || !load_file_path[0]) return false;
@@ -1481,6 +1498,8 @@ bool LoadWorldByPath(World *world, char *load_file_path)
     {
         goto error;
     }
+
+    FreeWorld(world); // 313 ....FreeWorld
 
     if (!DeserializeWorld(world, &APP->serialization_buffer))
     {
