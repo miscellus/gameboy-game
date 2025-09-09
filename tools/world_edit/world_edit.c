@@ -146,7 +146,7 @@ typedef struct History
     uint32_t count;
     uint32_t capacity;
     uint32_t undo_count;
-    uint32_t next_transaction_id;
+    uint32_t current_transaction_id;
 } History;
 
 typedef enum Editor_Mode
@@ -806,6 +806,66 @@ uint32_t FindTileMatch(Tile_Set tile_set, Tile *src_tile, uint32_t skip_index)
     return INVALID_TILE_INDEX;
 }
 
+void HistoryAddEntry(History_Entry history_entry)
+{
+    history_entry.transaction_id = APP->history.current_transaction_id;
+    assert(APP->history.undo_count <= APP->history.count);
+    APP->history.count -= APP->history.undo_count;
+    APP->history.undo_count = 0;
+    da_append(&APP->history, history_entry);
+}
+
+void HistoryEndTransaction(void)
+{
+    ++APP->history.current_transaction_id;
+}
+
+void HistoryUndo(void)
+{
+    // Remember: we are going from NEW to OLD, because it is undo
+
+    History *history = &APP->history;
+    assert(history->undo_count <= history->count);
+    if (history->count - history->undo_count == 0) return;
+
+    history->undo_count += 1;
+    History_Entry hist = history->items[history->count - history->undo_count];
+
+    if (hist.level_tile)
+    {
+        Tile *new_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+        hist.level_tile->index ^= hist.level_tile_delta.index;
+        hist.level_tile->is_solid ^= hist.level_tile_delta.is_solid;
+        Tile *old_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+
+        new_tile->ref_count -= 1;
+        old_tile->ref_count += 1;
+    }
+}
+
+void HistoryRedo(void)
+{
+    // Remember: we are going from NEW to OLD, because it is undo
+
+    History *history = &APP->history;
+    assert(history->undo_count <= history->count);
+    if (history->undo_count == 0) return;
+
+    History_Entry hist = history->items[history->count - history->undo_count];
+    history->undo_count -= 1;
+
+    if (hist.level_tile)
+    {
+        Tile *new_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+        hist.level_tile->index ^= hist.level_tile_delta.index;
+        hist.level_tile->is_solid ^= hist.level_tile_delta.is_solid;
+        Tile *old_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+
+        new_tile->ref_count += 1;
+        old_tile->ref_count -= 1;
+    }
+}
+
 void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *tile_set)
 {
     World_Position pos = GetWorldPosition(mouse_pos_world);
@@ -960,12 +1020,8 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
                     hist.level_tile_delta.is_solid ^= APP->current_is_solid;
                     hist.level_tile_delta.index ^= APP->current_tile_index;
                     hist.tile_index = INVALID_TILE_INDEX;
-                    hist.transaction_id = APP->history.next_transaction_id++;
-                    assert(APP->history.undo_count <= APP->history.count);
-                    APP->history.count -= APP->history.undo_count;
-                    APP->history.undo_count = 0;
-                    da_append(&APP->history, hist);
-
+                    HistoryAddEntry(hist);
+                    HistoryEndTransaction();
 
                     level_tile->index = APP->current_tile_index;
                     level_tile->is_solid = APP->current_is_solid;
@@ -1538,52 +1594,6 @@ bool LoadWorld(World *world)
     return LoadWorldByPath(world, load_file_path);
 }
 
-void Undo()
-{
-    // Remember: we are going from NEW to OLD, because it is undo
-
-    History *history = &APP->history;
-    assert(history->undo_count <= history->count);
-    if (history->count - history->undo_count == 0) return;
-
-    history->undo_count += 1;
-    History_Entry hist = history->items[history->count - history->undo_count];
-
-    if (hist.level_tile)
-    {
-        Tile *new_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
-        hist.level_tile->index ^= hist.level_tile_delta.index;
-        hist.level_tile->is_solid ^= hist.level_tile_delta.is_solid;
-        Tile *old_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
-
-        new_tile->ref_count -= 1;
-        old_tile->ref_count += 1;
-    }
-}
-
-void Redo()
-{
-    // Remember: we are going from NEW to OLD, because it is undo
-
-    History *history = &APP->history;
-    assert(history->undo_count <= history->count);
-    if (history->undo_count == 0) return;
-
-    History_Entry hist = history->items[history->count - history->undo_count];
-    history->undo_count -= 1;
-
-    if (hist.level_tile)
-    {
-        Tile *new_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
-        hist.level_tile->index ^= hist.level_tile_delta.index;
-        hist.level_tile->is_solid ^= hist.level_tile_delta.is_solid;
-        Tile *old_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
-
-        new_tile->ref_count += 1;
-        old_tile->ref_count -= 1;
-    }
-}
-
 void GlobalShortcuts(void)
 {
     KeyModifiers modifiers = GetKeyModifiers();
@@ -1615,8 +1625,8 @@ void GlobalShortcuts(void)
     if (modifiers.ctrl && IsKeyPressed(KEY_S)) SaveWorld(modifiers.shift, APP->world.level, APP->world.tile_set);
     if (modifiers.ctrl && IsKeyPressed(KEY_O)) LoadWorld(&APP->world);
 
-    if (modifiers.ctrl && !modifiers.shift && IsKeyPressed(KEY_Z)) Undo();
-    if (modifiers.ctrl && IsKeyPressed(KEY_Y) || (modifiers.shift && IsKeyPressed(KEY_Z))) Redo();
+    if (modifiers.ctrl && !modifiers.shift && IsKeyPressed(KEY_Z)) HistoryUndo();
+    if (modifiers.ctrl && IsKeyPressed(KEY_Y) || (modifiers.shift && IsKeyPressed(KEY_Z))) HistoryRedo();
 }
 
 int main(int argc, char **argv)
