@@ -188,8 +188,6 @@ typedef struct App
     Level_Tile *hot_auto_tile;
 
     World world;
-    Color *canvas_pixels;
-    Texture canvas;
 
     Tile_Atlas tile_atlas;
 
@@ -453,15 +451,7 @@ void InitApp(void)
 
     InitTileAtlas(&APP->tile_atlas);
 
-    memset(&APP->canvas, 0, sizeof(APP->canvas));
     InitWorld(&APP->world, 128, 64);
-    APP->canvas = LoadTextureFromImage((Image){
-        .width = APP->world.level.width*8,
-        .height = APP->world.level.height*8,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    });
-    APP->canvas_pixels = calloc(APP->canvas.width * APP->canvas.height, sizeof(*APP->canvas_pixels));
 
     APP->hot_auto_tile = NULL;
 
