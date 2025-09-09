@@ -564,39 +564,10 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
     Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, APP->camera_world);
     BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
     ClearBackground(COLOR_WORLD_BACKGROUND);
-    // DrawRectangleGradientV((int)view.x, (int)view.y, (int)view.width, (int)view.height, (Color){52, 61, 89, 255}, (Color){18, 22, 42, 255});
-
-#if 0
-    for (uint32_t tile_y = 0; tile_y < level.height; ++tile_y)
-    {
-        for (uint32_t tile_x = 0; tile_x < level.width; ++tile_x)
-        {
-            Level_Tile *level_tile = &level.tiles[tile_y * level.width + tile_x];
-            uint32_t tile_index = level_tile->index;
-            if (APP->hot_auto_tile == level_tile) tile_index = GetEditTileIndex(&tile_set);
-            assert(tile_index < tile_set.count);
-
-            Tile *tile = GetTile(tile_set, tile_index);
-
-            for (uint32_t y = 0; y < 8; ++y)
-            {
-                for (uint32_t x = 0; x < 8; ++x)
-                {
-                    uint32_t pixel_index = (tile_y * 8 + y) * level.width * 8 + (tile_x * 8 + x);
-                    APP->canvas_pixels[pixel_index] = palette_gbp[tile->color_indexes[y * 8 + x]];
-                }
-            }
-        }
-    }
-    UpdateTexture(APP->canvas, APP->canvas_pixels);
-#endif
 
     // Draw tiles
     BeginMode2D(APP->camera_world);
     {
-        // DrawTexture(APP->canvas, 0, 0, WHITE);
-        // DrawTexture(APP->tile_atlas.texture, 0, 0, WHITE);
-#if 1
         for (uint32_t tile_y = 0; tile_y < level.height; ++tile_y)
         {
             for (uint32_t tile_x = 0; tile_x < level.width; ++tile_x)
@@ -611,28 +582,12 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
                 Rectangle tile_rect = {tile_x*8.0f, tile_y*8.0f, 8.0f, 8.0f};
                 Rectangle rec = TileAtlasIndexToRect(tile->tile_atlas_index);
                 DrawTexturePro(APP->tile_atlas.texture, rec, tile_rect, (Vector2){0}, 0, WHITE);
+                if (level_tile->is_solid) DrawRectangleRec(tile_rect, COLOR_SOLID_BRUSH);
             }
         }
 
-#else
-        for (uint32_t y = 0; y < level.height; ++y)
-        {
-            for (uint32_t x = 0; x < level.width; ++x)
-            {
-                Level_Tile level_tile = level.tiles[y * level.width + x];
-                Texture2D texture = GetTexture(tile_set.items[level_tile.index].texture_index);
-                DrawTexture(texture, x*8, y*8, WHITE);
-                if (level_tile.is_solid) DrawRectangleRec((Rectangle){(float)x*8,(float)y*8,8,8}, COLOR_SOLID_BRUSH);
-            }
-        }
-
-        if (APP->mode == MODE_DRAW_PIXELS && APP->auto_new_tile && IsMouseButtonDown(MOUSE_BUTTON_LEFT))
-        {
-            World_Position edit_pos = GetWorldPosition(mouse_pos_world);
-            Texture2D texture = GetTexture(APP->edit_tile.texture_index);
-            DrawTexture(texture, edit_pos.tile_x*8, edit_pos.tile_y*8, WHITE);
-        }
-#endif
+        // Uncomment for debugging the tile_atlas texture:
+        // DrawTexture(APP->tile_atlas.texture, 0, 0, WHITE);
     }
     EndMode2D();
 
