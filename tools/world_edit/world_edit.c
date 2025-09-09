@@ -122,6 +122,28 @@ typedef struct World
     Tile_Set tile_set;
 } World;
 
+typedef struct History_Entry
+{
+    Tile_Set *tile_set;
+
+    // If != NULL, then what happended was level_tile->index += tile_index_delta
+    Level_Tile *level_tile;
+    int32_t tile_index_delta;
+
+    Tile_GB tile_delta;
+    uint32_t tile_index;
+
+    uint32_t transaction_id;
+} History_Entry;
+
+typedef struct History
+{
+    History_Entry *items;
+    uint32_t count;
+    uint32_t capacity;
+    uint32_t next_transaction_id;
+} History;
+
 typedef enum Editor_Mode
 {
     MODE_DRAW_TILES,
