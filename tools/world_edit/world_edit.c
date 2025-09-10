@@ -75,11 +75,6 @@ typedef struct World_Position
 
 typedef struct Tile_Line_GB
 {
-    uint8_t bit_planes[2];
-} Tile_Line_GB;
-
-typedef union Tile_GB
-{
     // NOTE(jkk): 128 bits
     //
     // Tiles in the game boy are stored line by line, using 2 bytes per line.
@@ -87,13 +82,24 @@ typedef union Tile_GB
     // color ID of each pixel, and the second byte specifies the most
     // significant bit. In both bytes, bit 7 represents the leftmost pixel, and
     // bit 0 the rightmost.
+    uint8_t bit_planes[2];
+} Tile_Line_GB;
+
+typedef union Tile_Packed
+{
     Tile_Line_GB lines[8];
+    uint8_t u8s[16];
     uint64_t u64s[2];
-} Tile_GB;
+} Tile_Packed;
+
+typedef struct Tile_Color_Indexes
+{
+    uint8_t v[8*8]; // NOTE(jkk): In range 0-3
+} Tile_Color_Indexes;
 
 typedef struct Tile
 {
-    uint8_t color_indexes[8*8]; // NOTE(jkk): In range 0-3
+    Tile_Color_Indexes color_indexes;
     uint32_t ref_count;
     uint32_t tile_atlas_index;
     bool texture_needs_update;
@@ -127,11 +133,21 @@ typedef struct World
     Tile_Set tile_set;
 } World;
 
+typedef uint8_t Tile_Set_Op;
+enum
+{
+    TILE_ADD,
+    TILE_DELETE,
+    TILE_UPDATE,
+};
+
 typedef struct History_Entry
 {
     Tile_Set *tile_set;
-    Tile_GB tile_delta;
+    Tile_Packed tile_delta;
     uint32_t tile_index;
+
+    Tile_Set_Op tile_set_op;
 
     // If != NULL, then what happended was level_tile->index += tile_index_delta
     Level_Tile *level_tile;
@@ -283,13 +299,13 @@ void FreeTileAtlasIndex(Tile_Atlas *tile_atlas, uint32_t index)
     tile_atlas->free_indexes[tile_atlas->free_index_count++] = index;
 }
 
-static Color* ConvertColorIndexesToPixels(uint8_t color_indexes[8*8])
+static Color* ConvertColorIndexesToPixels(Tile_Color_Indexes color_indexes)
 {
     static Color pixels[8*8];
 
     for (int i = 0; i < 8*8; ++i)
     {
-        uint8_t color_index = color_indexes[i];
+        uint8_t color_index = color_indexes.v[i];
         assert(color_index < 4);
         pixels[i] = palette_gbp[color_index];
     }
@@ -303,21 +319,48 @@ static void FillTile(Tile *tile, uint8_t color_index)
 
     for (uint32_t i = 0; i < 8*8; ++i)
     {
-        tile->color_indexes[i] = color_index;
+        tile->color_indexes.v[i] = color_index;
     }
 
     tile->texture_needs_update = true;
 }
 
-Tile_GB TileToGB(Tile *tile)
+static inline Tile_Packed PackTile(Tile_Color_Indexes color_indexes)
 {
-    Tile_GB tile_gb = {0};
+    Tile_Packed tile_pk = {0};
+
+    for (uint32_t i = 0; i < 8*8; ++i)
+    {
+        uint8_t color_index = color_indexes.v[i];
+        assert(color_index < 4);
+        tile_pk.u8s[i / 4] |= color_index << (2*(i % 4));
+    }
+
+    return tile_pk;
+}
+
+Tile_Color_Indexes UnpackTile(Tile_Packed tile_pk)
+{
+    Tile_Color_Indexes color_indexes = {0};
+
+    for (uint32_t i = 0; i < 8*8; ++i)
+    {
+        uint8_t packed = tile_pk.u8s[i / 4];
+        color_indexes.v[i] = (packed >> (2*(i % 4))) & 3;
+    }
+
+    return color_indexes;
+}
+
+static inline Tile_Packed PackTileGB(Tile_Color_Indexes color_indexes)
+{
+    Tile_Packed tile_gb = {0};
 
     for (int y = 0; y < 8; ++y)
     {
         for (int x = 0; x < 8; ++x)
         {
-            uint8_t pixel = tile->color_indexes[8*y + x];
+            uint8_t pixel = color_indexes.v[8*y + x];
             if (pixel & 1) tile_gb.lines[y].bit_planes[0] |= (0x80 >> x);
             if (pixel & 2) tile_gb.lines[y].bit_planes[1] |= (0x80 >> x);
         }
@@ -326,9 +369,9 @@ Tile_GB TileToGB(Tile *tile)
     return tile_gb;
 }
 
-Tile TileFromGB(Tile_GB tile_gb, Tile_Atlas *tile_atlas)
+Tile_Color_Indexes UnpackTileGB(Tile_Packed tile_gb)
 {
-    Tile tile = {0};
+    Tile_Color_Indexes color_indexes = {0};
 
     for (int y = 0; y < 8; ++y)
     {
@@ -337,14 +380,11 @@ Tile TileFromGB(Tile_GB tile_gb, Tile_Atlas *tile_atlas)
             uint8_t pixel = 0;
             if (tile_gb.lines[y].bit_planes[0] & (0x80 >> x)) pixel |= 1;
             if (tile_gb.lines[y].bit_planes[1] & (0x80 >> x)) pixel |= 2;
-            tile.color_indexes[8 * y + x] = pixel;
+            color_indexes.v[8 * y + x] = pixel;
         }
     }
 
-    tile.texture_needs_update = true;
-    tile.tile_atlas_index = GetNewTileAtlasIndex(tile_atlas);
-
-    return tile;
+    return color_indexes;
 }
 
 
@@ -384,7 +424,7 @@ void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_in
     assert(pixel_x >= 0 && pixel_x < 8 && pixel_y >= 0 && pixel_y < 8);
     assert(color_index < 4);
 
-    tile->color_indexes[pixel_y * 8 + pixel_x] = color_index;
+    tile->color_indexes.v[pixel_y * 8 + pixel_x] = color_index;
     tile->texture_needs_update = true;
 }
 
@@ -398,7 +438,7 @@ Tile CreateTile(Tile_Atlas *atlas)
 
 void CopyTilePixels(Tile *dst_tile, Tile *src_tile)
 {
-    memcpy(&dst_tile->color_indexes, &src_tile->color_indexes, 8*8*sizeof(*src_tile->color_indexes));
+    memcpy(&dst_tile->color_indexes, &src_tile->color_indexes, sizeof(src_tile->color_indexes));
     dst_tile->texture_needs_update = true;
 }
 
@@ -661,7 +701,7 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
     EndScissorMode();
 }
 
-static inline bool TileEqualsGB(Tile_GB a, Tile_GB b)
+static inline bool PackedTilesAreEqual(Tile_Packed a, Tile_Packed b)
 {
     return a.u64s[0] == b.u64s[0] && a.u64s[1] == b.u64s[1];
 }
@@ -786,34 +826,17 @@ void DrawSidePanel(Rectangle view, Tile_Set tile_set)
     EndScissorMode();
 }
 
-void CopyTile(Tile *dst, Tile *src)
-{
-    Color pixels[8*8];
-    for (int i = 0; i < 8*8; ++i)
-    {
-        uint8_t color_index = src->color_indexes[i];
-        if (color_index >= 4)
-        {
-            dst = dst;
-            assert(0 && "Color index is not in range 0-3");
-        }
-        dst->color_indexes[i] = color_index;
-        pixels[i] = palette_gbp[color_index];
-    }
-    // UpdateTexture(GetTexture(dst->texture_index), pixels);
-}
-
 uint32_t FindTileMatch(Tile_Set tile_set, Tile *src_tile, uint32_t skip_index)
 {
-    Tile_GB src_tile_gb = TileToGB(src_tile);
+    Tile_Packed src_tile_pk = PackTile(src_tile->color_indexes);
 
     for (uint32_t i = 0; i < tile_set.count; ++i)
     {
         if (i == skip_index) continue;
 
         Tile *tile = &tile_set.items[i];
-        Tile_GB tile_gb = TileToGB(tile);
-        if (TileEqualsGB(src_tile_gb, tile_gb))
+        Tile_Packed tile_pk = PackTile(tile->color_indexes);
+        if (PackedTilesAreEqual(src_tile_pk, tile_pk))
         {
             return i;
         }
@@ -1229,7 +1252,7 @@ void SerializeU16(Bytes *b, uint16_t v)
 
 void SerializeTile(Bytes *b, Tile *tile)
 {
-    Tile_GB tile_gb = TileToGB(tile);
+    Tile_Packed tile_gb = PackTileGB(tile->color_indexes);
 
     for (uint32_t i = 0; i < 8; ++i)
     {
@@ -1497,12 +1520,15 @@ bool DeserializeTileSet(uint8_t **at, uint8_t *end, Tile_Set *tile_set)
     da_reserve(tile_set, tile_count);
     tile_set->count = tile_count;
 
-    if (*at >= end - tile_count * sizeof(Tile_GB)) return false;
+    if (*at >= end - tile_count * sizeof(Tile_Packed)) return false;
 
-    for (uint16_t i = 0; i < tile_count; ++i, *at += sizeof(Tile_GB))
+    for (uint16_t i = 0; i < tile_count; ++i, *at += sizeof(Tile_Packed))
     {
-        Tile_GB tile_gb = *(Tile_GB *)(*at);
-        Tile tile = TileFromGB(tile_gb, &APP->tile_atlas);
+        Tile_Packed tile_gb = *(Tile_Packed *)(*at);
+        Tile tile = {0};
+        tile.color_indexes = UnpackTileGB(tile_gb);
+        tile.tile_atlas_index = GetNewTileAtlasIndex(&APP->tile_atlas);
+        tile.texture_needs_update = true;
         tile_set->items[i] = tile;
     }
 
