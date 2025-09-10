@@ -413,10 +413,10 @@ Level_Tile *LevelGetTile(Level level, uint32_t tile_x, uint32_t tile_y)
     return level_tile;
 }
 
-Tile *GetTile(Tile_Set tile_set, uint32_t index)
+Tile *GetTile(Tile_Set *tile_set, uint32_t index)
 {
-    assert(index < tile_set.count);
-    return &tile_set.items[index];
+    assert(index < tile_set->count);
+    return &tile_set->items[index];
 }
 
 void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_index)
@@ -611,7 +611,7 @@ static inline uint32_t GetEditTileIndex(Tile_Set *tile_set)
 void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
 {
     Level level = world.level;
-    Tile_Set tile_set = world.tile_set;
+    Tile_Set *tile_set = &world.tile_set;
 
     Vector2 mouse_pos_world = GetScreenToWorld2D(mouse_pos_screen, APP->camera_world);
     BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
@@ -626,8 +626,8 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
             {
                 Level_Tile *level_tile = &level.tiles[tile_y * level.width + tile_x];
                 uint32_t tile_index = level_tile->index;
-                if (APP->hot_auto_tile == level_tile) tile_index = GetEditTileIndex(&tile_set);
-                assert(tile_index < tile_set.count);
+                if (APP->hot_auto_tile == level_tile) tile_index = GetEditTileIndex(tile_set);
+                assert(tile_index < tile_set->count);
 
                 Tile *tile = GetTile(tile_set, tile_index);
 
@@ -871,10 +871,10 @@ void HistoryUndo(void)
 
     if (hist.level_tile)
     {
-        Tile *new_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+        Tile *new_tile = GetTile(&APP->world.tile_set, hist.level_tile->index);
         hist.level_tile->index ^= hist.level_tile_delta.index;
         hist.level_tile->is_solid ^= hist.level_tile_delta.is_solid;
-        Tile *old_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+        Tile *old_tile = GetTile(&APP->world.tile_set, hist.level_tile->index);
 
         new_tile->ref_count -= 1;
         old_tile->ref_count += 1;
@@ -894,10 +894,10 @@ void HistoryRedo(void)
 
     if (hist.level_tile)
     {
-        Tile *new_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+        Tile *new_tile = GetTile(&APP->world.tile_set, hist.level_tile->index);
         hist.level_tile->index ^= hist.level_tile_delta.index;
         hist.level_tile->is_solid ^= hist.level_tile_delta.is_solid;
-        Tile *old_tile = GetTile(APP->world.tile_set, hist.level_tile->index);
+        Tile *old_tile = GetTile(&APP->world.tile_set, hist.level_tile->index);
 
         new_tile->ref_count += 1;
         old_tile->ref_count -= 1;
@@ -917,8 +917,8 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
     if (APP->hot_auto_tile && (has_entered_new_tile || IsMouseButtonReleased(MOUSE_BUTTON_LEFT)))
     {
-        Tile *edit_tile = GetTile(*tile_set, edit_tile_index);
-        Tile *old_tile = GetTile(*tile_set, APP->hot_auto_tile->index);
+        Tile *edit_tile = GetTile(tile_set, edit_tile_index);
+        Tile *old_tile = GetTile(tile_set, APP->hot_auto_tile->index);
 
         assert(edit_tile_index != APP->hot_auto_tile->index);
         assert(edit_tile->ref_count == 0);
@@ -932,7 +932,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
         {
             // We found a duplicate tile.
 
-            Tile *matched_tile = GetTile(*tile_set, matched_tile_index);
+            Tile *matched_tile = GetTile(tile_set, matched_tile_index);
             APP->hot_auto_tile->index = matched_tile_index;
 
             old_tile->ref_count -= 1;
@@ -973,7 +973,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
             // Figure out if we can just modify the existing tile
             // or if we need to AUTOMATICALLY create a NEW TILE.
-            Tile *old_tile = GetTile(*tile_set, level_tile->index);
+            Tile *old_tile = GetTile(tile_set, level_tile->index);
             assert(old_tile->ref_count > 0 && "The ref count should be > 0 since we got the tile from the level");
 
             Tile clone = CreateTile(&APP->tile_atlas);
@@ -983,7 +983,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
             edit_tile_index = GetEditTileIndex(tile_set);
         }
 
-        Tile *tile = GetTile(*tile_set, edit_tile_index);
+        Tile *tile = GetTile(tile_set, edit_tile_index);
 
         SetTilePixel(tile, pos.pixel_x, pos.pixel_y, APP->current_color_index);
     }
@@ -997,7 +997,7 @@ void ModeDrawPixels(Vector2 mouse_pos_world, Level *level, Tile_Set *tile_set)
     Level_Tile *level_tile = LevelGetTile(*level, pos.tile_x, pos.tile_y);
     if (!level_tile) return;
 
-    SetTilePixel(GetTile(*tile_set, level_tile->index), pos.pixel_x, pos.pixel_y, APP->current_color_index);
+    SetTilePixel(GetTile(tile_set, level_tile->index), pos.pixel_x, pos.pixel_y, APP->current_color_index);
 }
 
 void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_scroll, Level *level, Tile_Set *tile_set)
@@ -1052,8 +1052,8 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
             Level_Tile *level_tile = LevelGetTile(*level, pos.tile_x, pos.tile_y);
             if (level_tile)
             {
-                Tile *old_tile = GetTile(*tile_set, level_tile->index);
-                Tile *new_tile = GetTile(*tile_set, APP->current_tile_index);
+                Tile *old_tile = GetTile(tile_set, level_tile->index);
+                Tile *new_tile = GetTile(tile_set, APP->current_tile_index);
                 if (old_tile != new_tile || level_tile->is_solid != APP->current_is_solid)
                 {
                     History_Entry hist = {0};
@@ -1081,9 +1081,9 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
 
 }
 
-void UpdateTileTextures(Tile_Set tile_set)
+void UpdateTileTextures(Tile_Set *tile_set)
 {
-    for (uint32_t i = 0; i < tile_set.count; ++i)
+    for (uint32_t i = 0; i < tile_set->count; ++i)
     {
         Tile *tile = GetTile(tile_set, i);
         if (!tile->texture_needs_update) continue;
@@ -1103,8 +1103,8 @@ void DeleteTile(uint32_t tile_index, Tile_Set *tile_set, World *world)
 
     if (tile_set->count == 1) return;
 
-    // TODO: @leak
-    // UnloadTexture(GetTile(tile_set->items[tile_index].texture_index));
+    Tile *tile = GetTile(tile_set, tile_index);
+    FreeTileAtlasIndex(&APP->tile_atlas, tile->tile_atlas_index);
 
     // Delete tile in tile_set
     uint32_t last_index = tile_set->count - 1;
@@ -1707,7 +1707,7 @@ int main(int argc, char **argv)
 
         APP->mouse_previous = mouse_pos_screen;
 
-        UpdateTileTextures(APP->world.tile_set);
+        UpdateTileTextures(&APP->world.tile_set);
 
         ///////////////////////////
         //                       //
