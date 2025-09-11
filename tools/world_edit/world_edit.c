@@ -1022,7 +1022,9 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
     uint32_t edit_tile_index = GetEditTileIndex(tile_set);
 
-    if (APP->hot_auto_tile && (has_entered_new_tile || IsMouseButtonReleased(MOUSE_BUTTON_LEFT)))
+    bool mouse_released = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
+
+    if (APP->hot_auto_tile && (has_entered_new_tile || mouse_released))
     {
         Tile *edit_tile = GetTile(tile_set, edit_tile_index);
         Tile *old_tile = GetTile(tile_set, APP->hot_auto_tile->index);
@@ -1050,8 +1052,6 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
                 act.level_tile_delta = *APP->hot_auto_tile;
                 act.level_tile_delta.index ^= matched_tile_index;
                 HistoryAddAction(act);
-
-                HistoryEndTransaction();
             }
 
             APP->hot_auto_tile->index = matched_tile_index;
@@ -1075,8 +1075,6 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
                 act.tile_index = APP->hot_auto_tile->index;
                 act.tile_delta = XorPackedTile(PackTile(old_tile->color_indexes), PackTile(edit_tile->color_indexes));
                 HistoryAddAction(act);
-
-                HistoryEndTransaction();
             }
 
             CopyTilePixels(old_tile, edit_tile);
@@ -1107,14 +1105,14 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
                 act.level_tile_delta = *APP->hot_auto_tile;
                 act.level_tile_delta.index ^= edit_tile_index;
                 HistoryAddAction(act);
-
-                HistoryEndTransaction();
             }
 
             old_tile->ref_count -= 1;
             edit_tile->ref_count += 1;
             APP->hot_auto_tile->index = edit_tile_index;
         }
+
+        if (mouse_released) HistoryEndTransaction();
 
         APP->hot_auto_tile = NULL;
     }
