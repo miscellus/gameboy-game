@@ -198,8 +198,8 @@ typedef struct App
     bool auto_new_tile;
     bool show_game_boy_screen;
 
-    // Auto tile state
-    Level_Tile *hot_auto_tile;
+    Level_Tile *hot_tile;
+    Tile_Packed tile_snapshot;
 
     World world;
 
@@ -510,7 +510,7 @@ void InitApp(void)
 
     APP->history = (History){0};
 
-    APP->hot_auto_tile = NULL;
+    APP->hot_tile = NULL;
 
     APP->currently_open_world_file_path = NULL;
     APP->save_file_format_version = 0;
@@ -631,7 +631,10 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
             {
                 Level_Tile *level_tile = &level.tiles[tile_y * level.width + tile_x];
                 uint32_t tile_index = level_tile->index;
-                if (APP->hot_auto_tile == level_tile) tile_index = GetEditTileIndex(tile_set);
+                if (APP->auto_new_tile && level_tile == APP->hot_tile)
+                {
+                    tile_index = GetEditTileIndex(tile_set);
+                }
                 assert(tile_index < tile_set->count);
 
                 Tile *tile = GetTile(tile_set, tile_index);
@@ -1024,12 +1027,12 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
     bool mouse_released = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
 
-    if (APP->hot_auto_tile && (has_entered_new_tile || mouse_released))
+    if (APP->hot_tile && (has_entered_new_tile || mouse_released))
     {
         Tile *edit_tile = GetTile(tile_set, edit_tile_index);
-        Tile *old_tile = GetTile(tile_set, APP->hot_auto_tile->index);
+        Tile *old_tile = GetTile(tile_set, APP->hot_tile->index);
 
-        assert(edit_tile_index != APP->hot_auto_tile->index);
+        assert(edit_tile_index != APP->hot_tile->index);
         assert(edit_tile->ref_count == 0);
         assert(old_tile->ref_count > 0);
         assert(edit_tile_index == tile_set->count - 1);
@@ -1048,13 +1051,13 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
                 act = (Action){0};
                 act.tile_set_op = TILE_NOP;
                 act.tile_set = tile_set;
-                act.level_tile = APP->hot_auto_tile;
-                act.level_tile_delta = *APP->hot_auto_tile;
+                act.level_tile = APP->hot_tile;
+                act.level_tile_delta = *APP->hot_tile;
                 act.level_tile_delta.index ^= matched_tile_index;
                 HistoryAddAction(act);
             }
 
-            APP->hot_auto_tile->index = matched_tile_index;
+            APP->hot_tile->index = matched_tile_index;
 
             old_tile->ref_count -= 1;
             matched_tile->ref_count += 1;
@@ -1072,7 +1075,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
                 act = (Action){0};
                 act.tile_set_op = TILE_UPDATE;
                 act.tile_set = tile_set;
-                act.tile_index = APP->hot_auto_tile->index;
+                act.tile_index = APP->hot_tile->index;
                 act.tile_delta = XorPackedTile(PackTile(old_tile->color_indexes), PackTile(edit_tile->color_indexes));
                 HistoryAddAction(act);
             }
@@ -1101,27 +1104,27 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
                 act = (Action){0};
                 act.tile_set_op = TILE_NOP;
                 act.tile_set = tile_set;
-                act.level_tile = APP->hot_auto_tile;
-                act.level_tile_delta = *APP->hot_auto_tile;
+                act.level_tile = APP->hot_tile;
+                act.level_tile_delta = *APP->hot_tile;
                 act.level_tile_delta.index ^= edit_tile_index;
                 HistoryAddAction(act);
             }
 
             old_tile->ref_count -= 1;
             edit_tile->ref_count += 1;
-            APP->hot_auto_tile->index = edit_tile_index;
+            APP->hot_tile->index = edit_tile_index;
         }
 
         if (mouse_released) HistoryEndTransaction();
 
-        APP->hot_auto_tile = NULL;
+        APP->hot_tile = NULL;
     }
 
     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
     {
         if (has_entered_new_tile || IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
         {
-            APP->hot_auto_tile = level_tile;
+            APP->hot_tile = level_tile;
 
             // Figure out if we can just modify the existing tile
             // or if we need to AUTOMATICALLY create a NEW TILE.
@@ -1143,13 +1146,45 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
 void ModeDrawPixels(Vector2 mouse_pos_world, Level *level, Tile_Set *tile_set)
 {
-    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) return;
-
     World_Position pos = GetWorldPosition(mouse_pos_world);
     Level_Tile *level_tile = LevelGetTile(*level, pos.tile_x, pos.tile_y);
     if (!level_tile) return;
 
-    SetTilePixel(GetTile(tile_set, level_tile->index), pos.pixel_x, pos.pixel_y, APP->current_color_index);
+    World_Position pos_prev = GetWorldPosition(GetScreenToWorld2D(APP->mouse_previous, APP->camera_world));
+    bool has_entered_new_tile = (pos_prev.tile_x != pos.tile_x || pos_prev.tile_y != pos.tile_y);
+
+    bool mouse_released = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
+
+    if (APP->hot_tile && (has_entered_new_tile || mouse_released))
+    {
+        Tile *old_tile = GetTile(tile_set, APP->hot_tile->index);
+
+        Action act;
+        act = (Action){0};
+        act.tile_set_op = TILE_UPDATE;
+        act.tile_set = tile_set;
+        act.tile_index = APP->hot_tile->index;
+        Tile_Packed hot_tile_now = PackTile(old_tile->color_indexes);
+        act.tile_delta = XorPackedTile(APP->tile_snapshot, hot_tile_now);
+        HistoryAddAction(act);
+
+        if (mouse_released) HistoryEndTransaction();
+
+        APP->hot_tile = NULL;
+    }
+
+    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+    {
+        Tile *tile = GetTile(tile_set, level_tile->index);
+
+        if (has_entered_new_tile || IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+            APP->hot_tile = level_tile;
+            APP->tile_snapshot = PackTile(tile->color_indexes);
+        }
+
+        SetTilePixel(tile, pos.pixel_x, pos.pixel_y, APP->current_color_index);
+    }
 }
 
 void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_scroll, Level *level, Tile_Set *tile_set)
