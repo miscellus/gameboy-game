@@ -19,7 +19,7 @@ static Cmd cmd;
 
 bool build_world_edit(void)
 {
-
+#if defined(_MSC_VER)
     cmd_append(&cmd, "cl", "-nologo", "-Od", "-Zi", "-std:c11", "-W4", "-WX", "-FC");
     cmd_append(&cmd, "-D_CRT_SECURE_NO_DEPRECATE", "-D_CRT_NONSTDC_NO_DEPRECATE");
     cmd_append(&cmd, "gdi32.lib", "msvcrt.lib", "raylib.lib", "winmm.lib", "user32.lib", "shell32.lib");
@@ -32,6 +32,18 @@ bool build_world_edit(void)
     cmd_append(&cmd, "/link");
     cmd_append(&cmd, "/libpath:" RAYLIB_LIB);
     cmd_append(&cmd, "/NODEFAULTLIB:libcmt");
+#else
+    cmd_append(&cmd, "gcc");
+    cmd_append(&cmd, "-std=c11", "-O0", "-g", "-Wall", "-Wextra", "-Werror");
+    cmd_append(&cmd, "-Wno-cast-function-type");
+    cmd_append(&cmd, "-I" RAYLIB_INCLUDE);
+    cmd_append(&cmd, "-o", PATH_BUILD "world_edit.exe");
+    cmd_append(&cmd, "tools\\world_edit\\world_edit.c");
+    cmd_append(&cmd, "tools\\world_edit\\tinyfiledialogs.c");
+    cmd_append(&cmd, "-L" RAYLIB_LIB);
+    cmd_append(&cmd, "-lraylib", "-lgdi32", "-lwinmm"); // Raylib linking
+    cmd_append(&cmd, "-lole32", "-lcomdlg32", "-luser32", "-lshell32"); // Tiny file dialogs linking
+#endif
 
     if (!cmd_run_sync_and_reset(&cmd)) return false;
     return true;

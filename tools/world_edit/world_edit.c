@@ -409,8 +409,7 @@ World_Position GetWorldPosition(Vector2 point)
 Level_Tile *LevelGetTile(Level level, uint32_t tile_x, uint32_t tile_y)
 {
     Level_Tile *level_tile = NULL;
-    if (tile_x >= 0 && tile_x < level.width &&
-        tile_y >= 0 && tile_y < level.height)
+    if (tile_x < level.width && tile_y < level.height)
     {
         level_tile = &level.tiles[tile_y * level.width + tile_x];
     }
@@ -426,7 +425,7 @@ Tile *GetTile(Tile_Set *tile_set, uint32_t index)
 
 void SetTilePixel(Tile *tile, uint8_t pixel_x, uint8_t pixel_y, uint8_t color_index)
 {
-    assert(pixel_x >= 0 && pixel_x < 8 && pixel_y >= 0 && pixel_y < 8);
+    assert(pixel_x < 8 && pixel_y < 8);
     assert(color_index < 4);
 
     tile->color_indexes.v[pixel_y * 8 + pixel_x] = color_index;
@@ -492,7 +491,7 @@ void InitApp(void)
     APP->side_panel_zoom = 4.0f;
     APP->side_panel_scroll_offset = 0.0f;
 
-    APP->mouse_previous = (Vector2){0.0f};
+    APP->mouse_previous = (Vector2){0};
     APP->current_color_index = 0; // NOTE(jkk): In range 0-3
     APP->current_tile_index = 0;
     APP->current_is_solid = false;
@@ -1222,7 +1221,7 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
     }
     else if (APP->mode == MODE_DRAW_TILES)
     {
-        if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+        if (modifiers.ctrl)
         {
             int change = -!!IsKeyPressed(KEY_UP) + !!IsKeyPressed(KEY_DOWN);
             if (change)
@@ -1586,15 +1585,15 @@ bool BytesReadFile(Bytes *b, FILE *f)
     if (fseek(f, 0, SEEK_END) < 0) return false;
 
 #ifndef _WIN32
-    uint32_t file_size = (uint32_t)ftell(f);
+    long file_size = ftell(f);
 #else
-    uint32_t file_size = (uint32_t)_ftelli64(f);
+    long long file_size = _ftelli64(f);
 #endif
 
     if (file_size < 0) return false;
     if (fseek(f, 0, SEEK_SET) < 0) return false;
 
-    uint32_t new_count = b->count + file_size;
+    uint32_t new_count = b->count + (uint32_t)file_size;
     da_reserve(b, new_count);
 
     fread(b->items + b->count, file_size, 1, f);
@@ -1831,7 +1830,7 @@ void GlobalShortcuts(void)
 {
     KeyModifiers modifiers = GetKeyModifiers();
 
-    if (modifiers.alt && IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_F11))
+    if (IsKeyPressed(KEY_F11) || (modifiers.alt && IsKeyPressed(KEY_ENTER)))
     {
         ToggleFullscreen();
     }
@@ -1850,16 +1849,30 @@ void GlobalShortcuts(void)
         }
     }
 
-    if (IsKeyPressed(KEY_F1))
+    if (IsKeyPressed(KEY_F1) || (modifiers.shift && IsKeyPressed(KEY_SLASH)))
     {
-        tinyfd_messageBox("Title", "Message", "ok", "info", 1);
+        const char *shortcut_legends =
+        "Tab:\t\tSwitch mode\n"
+        "Shift+Tab:\tSwitch sub-mode\n"
+        "G:\t\tShow/hide grid\n"
+        "Shift+G:\t\tShow/hide Game Boy display guide\n"
+        "I:\t\tShow/hide tile indexes\n"
+        "Ctrl+Z:\t\tUndo\n"
+        "Ctrl+Shift+Z:\tRedo\n"
+        "Ctrl+Y:\t\tRedo\n"
+        "Ctrl+O:\t\tOpen\n"
+        "Ctrl+S:\t\tSave\n"
+        "Ctrl+Shift+S:\tSave as\n"
+        ;
+
+        tinyfd_messageBox("Shortcut Cheat Sheet", shortcut_legends, "ok", "info", 1);
     }
 
     if (modifiers.ctrl && IsKeyPressed(KEY_S)) SaveWorld(modifiers.shift, APP->world.level, APP->world.tile_set);
     if (modifiers.ctrl && IsKeyPressed(KEY_O)) LoadWorld(&APP->world);
 
     if (modifiers.ctrl && !modifiers.shift && IsKeyPressed(KEY_Z)) HistoryUndo();
-    if (modifiers.ctrl && IsKeyPressed(KEY_Y) || (modifiers.shift && IsKeyPressed(KEY_Z))) HistoryRedo();
+    if ((modifiers.ctrl && IsKeyPressed(KEY_Y)) || (modifiers.shift && IsKeyPressed(KEY_Z))) HistoryRedo();
 }
 
 int main(int argc, char **argv)
