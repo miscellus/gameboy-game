@@ -1250,7 +1250,6 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
                     act.level_tile_delta.index ^= APP->current_tile_index;
                     act.tile_index = INVALID_TILE_INDEX;
                     HistoryAddAction(act);
-                    HistoryEndTransaction();
 
                     level_tile->index = APP->current_tile_index;
                     level_tile->is_solid = APP->current_is_solid;
@@ -1259,6 +1258,10 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
                     ++new_tile->ref_count;
                 }
             }
+        }
+        else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
+        {
+            HistoryEndTransaction();
         }
     }
     else
