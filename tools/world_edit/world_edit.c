@@ -870,21 +870,18 @@ void HistoryUndo(void)
     // TILE_ADD and add a tile on TILE_DELETE, not confusing at all (^;
 
     History *history = &APP->history;
-    assert(history->undo_count <= history->count);
-    if (history->count == history->undo_count) return;
+    if (history->undo_count == history->count) return;
+    assert(history->undo_count < history->count);
 
-    history->undo_count += 1;
-    Action act = history->items[history->count - history->undo_count];
+    Action act = history->items[history->count - 1 - history->undo_count];
 
-    printf("UNDO: %d\n", act.transaction_id);
-    fflush(stdout);
+    uint32_t transaction_id = act.transaction_id;
 
-    // for (
-    //     uint32_t transaction_id = act.transaction_id;
-    //     history->undo_count < history->count && act.transaction_id == transaction_id;
-    //     history->undo_count += 1,
-    //     act = history->items[history->count - history->undo_count])
+    while (act.transaction_id == transaction_id)
     {
+        printf("UNDO: %d\n", act.transaction_id);
+        fflush(stdout);
+
         if (act.level_tile)
         {
             assert(act.tile_set);
@@ -935,6 +932,10 @@ void HistoryUndo(void)
                     break;
             }
         }
+
+        history->undo_count += 1;
+        if (history->undo_count == history->count) return;
+        act = history->items[history->count - 1 - history->undo_count];
     }
 }
 
@@ -947,18 +948,14 @@ void HistoryRedo(void)
     if (history->undo_count == 0) return;
 
     Action act = history->items[history->count - history->undo_count];
-    history->undo_count -= 1;
 
+    uint32_t transaction_id = act.transaction_id;
 
-    printf("UNDO: %d\n", act.transaction_id);
-    fflush(stdout);
-
-    // for (
-    //     uint32_t transaction_id = act.transaction_id;
-    //     history->undo_count > 0 && act.transaction_id == transaction_id;
-    //     act = history->items[history->count - history->undo_count],
-    //     history->undo_count -= 1)
+    while (act.transaction_id == transaction_id)
     {
+        printf("REDO: %d\n", act.transaction_id);
+        fflush(stdout);
+
         if (act.level_tile)
         {
             Tile *new_tile = GetTile(act.tile_set, act.level_tile->index);
@@ -1007,6 +1004,10 @@ void HistoryRedo(void)
                     break;
             }
         }
+
+        history->undo_count -= 1;
+        if (history->undo_count == 0) return;
+        act = history->items[history->count - history->undo_count];
     }
 }
 
