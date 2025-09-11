@@ -337,6 +337,13 @@ static inline Tile_Packed PackTile(Tile_Color_Indexes color_indexes)
     return tile_pk;
 }
 
+static inline Tile_Packed XorPackedTile(Tile_Packed a, Tile_Packed b)
+{
+    a.u64s[0] ^= b.u64s[0];
+    a.u64s[1] ^= b.u64s[1];
+    return a;
+}
+
 Tile_Color_Indexes UnpackTile(Tile_Packed tile_pk)
 {
     Tile_Color_Indexes color_indexes = {0};
@@ -918,9 +925,7 @@ void HistoryUndo(void)
                 {
                     Tile *tile = GetTile(act.tile_set, act.tile_index);
                     Tile_Packed new_packed = PackTile(tile->color_indexes);
-                    Tile_Packed old_packed = {0};
-                    old_packed.u64s[0] = new_packed.u64s[0] ^ act.tile_delta.u64s[0];
-                    old_packed.u64s[1] = new_packed.u64s[1] ^ act.tile_delta.u64s[1];
+                    Tile_Packed old_packed = XorPackedTile(new_packed, act.tile_delta);
                     tile->color_indexes = UnpackTile(old_packed);
                     tile->texture_needs_update = true;
                 } break;
@@ -992,9 +997,7 @@ void HistoryRedo(void)
                 {
                     Tile *tile = GetTile(act.tile_set, act.tile_index);
                     Tile_Packed old_packed = PackTile(tile->color_indexes);
-                    Tile_Packed new_packed = {0};
-                    new_packed.u64s[0] = old_packed.u64s[0] ^ act.tile_delta.u64s[0];
-                    new_packed.u64s[1] = old_packed.u64s[1] ^ act.tile_delta.u64s[1];
+                    Tile_Packed new_packed = XorPackedTile(old_packed, act.tile_delta);
                     tile->color_indexes = UnpackTile(new_packed);
                     tile->texture_needs_update = true;
                 } break;
@@ -1069,10 +1072,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
                 act.tile_set_op = TILE_UPDATE;
                 act.tile_set = tile_set;
                 act.tile_index = APP->hot_auto_tile->index;
-                Tile_Packed old_packed = PackTile(old_tile->color_indexes);
-                Tile_Packed new_packed = PackTile(edit_tile->color_indexes);
-                act.tile_delta.u64s[0] = old_packed.u64s[0] ^ new_packed.u64s[0];
-                act.tile_delta.u64s[1] = old_packed.u64s[1] ^ new_packed.u64s[1];
+                act.tile_delta = XorPackedTile(PackTile(old_tile->color_indexes), PackTile(edit_tile->color_indexes));
                 HistoryAddAction(act);
 
                 HistoryEndTransaction();
