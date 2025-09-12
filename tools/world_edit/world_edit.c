@@ -1221,17 +1221,6 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
     }
     else if (APP->mode == MODE_DRAW_TILES)
     {
-        if (modifiers.ctrl)
-        {
-            int change = -!!IsKeyPressed(KEY_UP) + !!IsKeyPressed(KEY_DOWN);
-            if (change)
-            {
-                APP->current_tile_index += change;
-                if (APP->current_tile_index < 0) APP->current_tile_index = 0;
-                else if (APP->current_tile_index > tile_set->count - 1) APP->current_tile_index = (uint32_t)tile_set->count - 1;
-            }
-        }
-
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
             World_Position pos = GetWorldPosition(mouse_pos_world);
@@ -1876,6 +1865,15 @@ void GlobalShortcuts(void)
 
     if (modifiers.ctrl && !modifiers.shift && IsKeyPressed(KEY_Z)) HistoryUndo();
     if ((modifiers.ctrl && IsKeyPressed(KEY_Y)) || (modifiers.shift && IsKeyPressed(KEY_Z))) HistoryRedo();
+
+    if (modifiers.ctrl)
+    {
+        int change = !!IsKeyPressed(KEY_UP) - !!IsKeyPressed(KEY_DOWN);
+        if (change)
+        {
+            APP->current_tile_index = (APP->current_tile_index + change + APP->world.tile_set.count) % (APP->world.tile_set.count);
+        }
+    }
 }
 
 int main(int argc, char **argv)
