@@ -862,7 +862,45 @@ uint32_t FindTileMatch(Tile_Set tile_set, Tile *src_tile, uint32_t skip_index)
     return INVALID_TILE_INDEX;
 }
 
-void HistoryAddAction(Action action)
+Action ActLevelTileUpdate(Level_Tile *level_tile, Level_Tile level_tile_delta, Tile_Set *tile_set)
+{
+    Action act = {0};
+    act.kind = ACT_LEVEL_TILE_UPDATE;
+    act.tile_set = tile_set;
+    act.as.level_action.level_tile = level_tile;
+    act.as.level_action.level_tile_delta = level_tile_delta;
+    return act;
+}
+
+Action ActTileAdd(Tile_Set *tile_set, Tile_Packed tile_delta)
+{
+    Action act = {0};
+    act.kind = ACT_TILE_ADD;
+    act.tile_set = tile_set;
+    act.as.tile_action.tile_delta = tile_delta;
+    return act;
+}
+
+Action ActTileDelete(Tile_Set *tile_set, Tile_Packed tile_delta)
+{
+    Action act = {0};
+    act.kind = ACT_TILE_DELETE;
+    act.tile_set = tile_set;
+    act.as.tile_action.tile_delta = tile_delta;
+    return act;
+}
+
+Action ActTileUpdate(Tile_Set *tile_set, uint32_t tile_index, Tile_Packed tile_delta)
+{
+    Action act = {0};
+    act.kind = ACT_TILE_UPDATE;
+    act.tile_set = tile_set;
+    act.as.tile_action.tile_index = tile_index;
+    act.as.tile_action.tile_delta = tile_delta;
+    return act;
+}
+
+void Record(Action action)
 {
     action.transaction_id = APP->history.current_transaction_id;
     assert(APP->history.undo_count <= APP->history.count);
@@ -871,9 +909,98 @@ void HistoryAddAction(Action action)
     da_append(&APP->history, action);
 }
 
-void HistoryEndTransaction(void)
+void EndRecordTransaction(void)
 {
     ++APP->history.current_transaction_id;
+}
+
+void Undo(Action act)
+{
+    switch (act.kind)
+    {
+        case ACT_LEVEL_TILE_UPDATE:
+        {
+            Action_Level_Tile lvl_act = act.as.level_action;
+            Tile *new_tile = GetTile(act.tile_set, lvl_act.level_tile->index);
+            lvl_act.level_tile->index ^= lvl_act.level_tile_delta.index;
+            lvl_act.level_tile->is_solid ^= lvl_act.level_tile_delta.is_solid;
+            Tile *old_tile = GetTile(act.tile_set, lvl_act.level_tile->index);
+
+            new_tile->ref_count -= 1;
+            old_tile->ref_count += 1;
+        } break;
+
+        case ACT_TILE_ADD:
+        {
+            Tile *tile = GetTile(act.tile_set, act.tile_set->count - 1);
+            FreeTileAtlasIndex(&APP->tile_atlas, tile->tile_atlas_index);
+            act.tile_set->count -= 1;
+        } break;
+
+        case ACT_TILE_DELETE:
+        {
+            Tile tile = CreateTile(&APP->tile_atlas);
+            tile.color_indexes = UnpackTile(act.as.tile_action.tile_delta);
+            da_append(act.tile_set, tile);
+        } break;
+
+        case ACT_TILE_UPDATE:
+        {
+            Tile *tile = GetTile(act.tile_set, act.as.tile_action.tile_index);
+            Tile_Packed new_packed = PackTile(tile->color_indexes);
+            Tile_Packed old_packed = XorPackedTile(new_packed, act.as.tile_action.tile_delta);
+            tile->color_indexes = UnpackTile(old_packed);
+            tile->texture_needs_update = true;
+        } break;
+
+        default:
+            TODO("HistoryUndo: Unimplemented Action_Kind");
+            break;
+    }
+}
+
+void Do(Action act)
+{
+    switch (act.kind)
+    {
+        case ACT_LEVEL_TILE_UPDATE:
+        {
+            Tile *old_tile = GetTile(act.tile_set, act.as.level_action.level_tile->index);
+            act.as.level_action.level_tile->index ^= act.as.level_action.level_tile_delta.index;
+            act.as.level_action.level_tile->is_solid ^= act.as.level_action.level_tile_delta.is_solid;
+            Tile *new_tile = GetTile(act.tile_set, act.as.level_action.level_tile->index);
+
+            new_tile->ref_count += 1;
+            old_tile->ref_count -= 1;
+        } break;
+
+        case ACT_TILE_ADD:
+        {
+            Tile tile = CreateTile(&APP->tile_atlas);
+            tile.color_indexes = UnpackTile(act.as.tile_action.tile_delta);
+            da_append(act.tile_set, tile);
+        } break;
+
+        case ACT_TILE_DELETE:
+        {
+            Tile *tile = GetTile(act.tile_set, act.tile_set->count - 1);
+            FreeTileAtlasIndex(&APP->tile_atlas, tile->tile_atlas_index);
+            act.tile_set->count -= 1;
+        } break;
+
+        case ACT_TILE_UPDATE:
+        {
+            Tile *tile = GetTile(act.tile_set, act.as.tile_action.tile_index);
+            Tile_Packed old_packed = PackTile(tile->color_indexes);
+            Tile_Packed new_packed = XorPackedTile(old_packed, act.as.tile_action.tile_delta);
+            tile->color_indexes = UnpackTile(new_packed);
+            tile->texture_needs_update = true;
+        } break;
+
+        default:
+            TODO("HistoryRedo: Unimplemented Action_Kind");
+            break;
+    }
 }
 
 void HistoryUndo(void)
@@ -895,50 +1022,7 @@ void HistoryUndo(void)
         printf("UNDO: %d\n", act.transaction_id);
         fflush(stdout);
 
-        switch (act.kind)
-        {
-            case ACT_LEVEL_TILE_UPDATE:
-            {
-                Action_Level_Tile lvl_act = act.as.level_action;
-                Tile *new_tile = GetTile(act.tile_set, lvl_act.level_tile->index);
-                lvl_act.level_tile->index ^= lvl_act.level_tile_delta.index;
-                lvl_act.level_tile->is_solid ^= lvl_act.level_tile_delta.is_solid;
-                Tile *old_tile = GetTile(act.tile_set, lvl_act.level_tile->index);
-
-                new_tile->ref_count -= 1;
-                old_tile->ref_count += 1;
-            } break;
-
-            case ACT_TILE_ADD:
-            {
-                assert(act.as.tile_action.tile_index == (act.tile_set->count - 1));
-                Tile *tile = GetTile(act.tile_set, act.as.tile_action.tile_index);
-                FreeTileAtlasIndex(&APP->tile_atlas, tile->tile_atlas_index);
-                act.tile_set->count -= 1;
-            } break;
-
-            case ACT_TILE_DELETE:
-            {
-                assert(act.as.tile_action.tile_index == act.tile_set->count);
-                Tile tile = CreateTile(&APP->tile_atlas);
-                tile.color_indexes = UnpackTile(act.as.tile_action.tile_delta);
-                da_append(act.tile_set, tile);
-            } break;
-
-            case ACT_TILE_UPDATE:
-            {
-                Tile *tile = GetTile(act.tile_set, act.as.tile_action.tile_index);
-                Tile_Packed new_packed = PackTile(tile->color_indexes);
-                Tile_Packed old_packed = XorPackedTile(new_packed, act.as.tile_action.tile_delta);
-                tile->color_indexes = UnpackTile(old_packed);
-                tile->texture_needs_update = true;
-            } break;
-
-            default:
-                TODO("HistoryUndo: Unimplemented Action_Kind");
-                break;
-
-        }
+        Undo(act);
 
         history->undo_count += 1;
         if (history->undo_count == history->count) return;
@@ -963,54 +1047,18 @@ void HistoryRedo(void)
         printf("REDO: %d\n", act.transaction_id);
         fflush(stdout);
 
-        switch (act.kind)
-        {
-            case ACT_LEVEL_TILE_UPDATE:
-            {
-                Action_Level_Tile lvl_act = act.as.level_action;
-                Tile *new_tile = GetTile(act.tile_set, lvl_act.level_tile->index);
-                lvl_act.level_tile->index ^= lvl_act.level_tile_delta.index;
-                lvl_act.level_tile->is_solid ^= lvl_act.level_tile_delta.is_solid;
-                Tile *old_tile = GetTile(act.tile_set, lvl_act.level_tile->index);
-
-                new_tile->ref_count += 1;
-                old_tile->ref_count -= 1;
-            } break;
-
-            case ACT_TILE_ADD:
-            {
-                assert(act.as.tile_action.tile_index == act.tile_set->count);
-                Tile tile = CreateTile(&APP->tile_atlas);
-                tile.color_indexes = UnpackTile(act.as.tile_action.tile_delta);
-                da_append(act.tile_set, tile);
-            } break;
-
-            case ACT_TILE_DELETE:
-            {
-                assert(act.as.tile_action.tile_index == (act.tile_set->count - 1));
-                Tile *tile = GetTile(act.tile_set, act.as.tile_action.tile_index);
-                FreeTileAtlasIndex(&APP->tile_atlas, tile->tile_atlas_index);
-                act.tile_set->count -= 1;
-            } break;
-
-            case ACT_TILE_UPDATE:
-            {
-                Tile *tile = GetTile(act.tile_set, act.as.tile_action.tile_index);
-                Tile_Packed old_packed = PackTile(tile->color_indexes);
-                Tile_Packed new_packed = XorPackedTile(old_packed, act.as.tile_action.tile_delta);
-                tile->color_indexes = UnpackTile(new_packed);
-                tile->texture_needs_update = true;
-            } break;
-
-            default:
-                TODO("HistoryRedo: Unimplemented Action_Kind");
-                break;
-        }
+        Do(act);
 
         history->undo_count -= 1;
         if (history->undo_count == 0) return;
         act = history->items[history->count - history->undo_count];
     }
+}
+
+static inline void RecordAndDo(Action act)
+{
+    Record(act);
+    Do(act);
 }
 
 void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *tile_set)
@@ -1042,48 +1090,21 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
         if (matched_tile_index != INVALID_TILE_INDEX)
         {
             // We found a duplicate tile.
-            Tile *matched_tile = GetTile(tile_set, matched_tile_index);
-
-            {
-                Action act;
-
-                act = (Action){0};
-                act.kind = ACT_LEVEL_TILE_UPDATE;
-                act.tile_set = tile_set;
-                act.as.level_action.level_tile = APP->hot_tile;
-                act.as.level_action.level_tile_delta = *APP->hot_tile;
-                act.as.level_action.level_tile_delta.index ^= matched_tile_index;
-                HistoryAddAction(act);
-            }
-
-            APP->hot_tile->index = matched_tile_index;
-
-            old_tile->ref_count -= 1;
-            matched_tile->ref_count += 1;
+            Level_Tile delta = *APP->hot_tile;
+            delta.index ^= matched_tile_index;
+            RecordAndDo(ActLevelTileUpdate(APP->hot_tile, delta, tile_set));
 
             // Remove temporary edit tile
-            DeleteLastTile(tile_set, &APP->tile_atlas);
+            Do(ActTileDelete(tile_set, PackTile(edit_tile->color_indexes)));
         }
         else if (old_tile->ref_count == 1)
         {
             // We can reuse the old tile
-
-            {
-                Action act;
-
-                act = (Action){0};
-                act.kind = ACT_TILE_UPDATE;
-                act.tile_set = tile_set;
-                act.as.tile_action.tile_index = APP->hot_tile->index;
-                act.as.tile_action.tile_delta = XorPackedTile(PackTile(old_tile->color_indexes), PackTile(edit_tile->color_indexes));
-                HistoryAddAction(act);
-            }
-
-            CopyTilePixels(old_tile, edit_tile);
-            old_tile->ref_count = 1;
+            Tile_Packed delta = XorPackedTile(PackTile(old_tile->color_indexes), PackTile(edit_tile->color_indexes));
+            RecordAndDo(ActTileUpdate(tile_set, APP->hot_tile->index, delta));
 
             // Remove temporary edit tile
-            DeleteLastTile(tile_set, &APP->tile_atlas);
+            Do(ActTileDelete(tile_set, PackTile(edit_tile->color_indexes)));
         }
         else
         {
@@ -1091,30 +1112,14 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
             // because it is used elsewhere.
             assert(old_tile->ref_count > 1);
 
-            {
-                Action act;
-                act = (Action){0};
-                act.kind = ACT_TILE_ADD;
-                act.tile_set = tile_set;
-                act.as.tile_action.tile_index = edit_tile_index;
-                act.as.tile_action.tile_delta = PackTile(edit_tile->color_indexes);
-                HistoryAddAction(act);
+            Record(ActTileAdd(tile_set, PackTile(edit_tile->color_indexes)));
 
-                act = (Action){0};
-                act.kind = ACT_LEVEL_TILE_UPDATE;
-                act.tile_set = tile_set;
-                act.as.level_action.level_tile = APP->hot_tile;
-                act.as.level_action.level_tile_delta = *APP->hot_tile;
-                act.as.level_action.level_tile_delta.index ^= edit_tile_index;
-                HistoryAddAction(act);
-            }
-
-            old_tile->ref_count -= 1;
-            edit_tile->ref_count += 1;
-            APP->hot_tile->index = edit_tile_index;
+            Level_Tile delta = *APP->hot_tile;
+            delta.index ^= edit_tile_index;
+            RecordAndDo(ActLevelTileUpdate(APP->hot_tile, delta, tile_set));
         }
 
-        if (mouse_released) HistoryEndTransaction();
+        if (mouse_released) EndRecordTransaction();
 
         APP->hot_tile = NULL;
     }
@@ -1130,10 +1135,10 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
             Tile *old_tile = GetTile(tile_set, level_tile->index);
             assert(old_tile->ref_count > 0 && "The ref count should be > 0 since we got the tile from the level");
 
-            Tile clone = CreateTile(&APP->tile_atlas);
-            CopyTilePixels(&clone, old_tile);
+            Tile_Packed tile_data = PackTile(old_tile->color_indexes);
 
-            da_append(tile_set, clone);
+            Do(ActTileAdd(tile_set, tile_data));
+
             edit_tile_index = GetEditTileIndex(tile_set);
         }
 
@@ -1157,17 +1162,10 @@ void ModeDrawPixels(Vector2 mouse_pos_world, Level *level, Tile_Set *tile_set)
     if (APP->hot_tile && (has_entered_new_tile || mouse_released))
     {
         Tile *old_tile = GetTile(tile_set, APP->hot_tile->index);
+        Tile_Packed delta = XorPackedTile(APP->tile_snapshot, PackTile(old_tile->color_indexes));
+        Record(ActTileUpdate(tile_set, APP->hot_tile->index, delta));
 
-        Action act;
-        act = (Action){0};
-        act.kind = ACT_TILE_UPDATE;
-        act.tile_set = tile_set;
-        act.as.tile_action.tile_index = APP->hot_tile->index;
-        Tile_Packed hot_tile_now = PackTile(old_tile->color_indexes);
-        act.as.tile_action.tile_delta = XorPackedTile(APP->tile_snapshot, hot_tile_now);
-        HistoryAddAction(act);
-
-        if (mouse_released) HistoryEndTransaction();
+        if (mouse_released) EndRecordTransaction();
 
         APP->hot_tile = NULL;
     }
@@ -1225,32 +1223,17 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
         {
             World_Position pos = GetWorldPosition(mouse_pos_world);
             Level_Tile *level_tile = LevelGetTile(*level, pos.tile_x, pos.tile_y);
-            if (level_tile)
+            if (level_tile && (level_tile->index != APP->current_tile_index || level_tile->is_solid != APP->current_is_solid))
             {
-                Tile *old_tile = GetTile(tile_set, level_tile->index);
-                Tile *new_tile = GetTile(tile_set, APP->current_tile_index);
-                if (old_tile != new_tile || level_tile->is_solid != APP->current_is_solid)
-                {
-                    Action act = {0};
-                    act.kind = ACT_LEVEL_TILE_UPDATE;
-                    act.tile_set = tile_set;
-                    act.as.level_action.level_tile = level_tile;
-                    act.as.level_action.level_tile_delta = *level_tile;
-                    act.as.level_action.level_tile_delta.is_solid ^= APP->current_is_solid;
-                    act.as.level_action.level_tile_delta.index ^= APP->current_tile_index;
-                    HistoryAddAction(act);
-
-                    level_tile->index = APP->current_tile_index;
-                    level_tile->is_solid = APP->current_is_solid;
-
-                    --old_tile->ref_count;
-                    ++new_tile->ref_count;
-                }
+                Level_Tile level_tile_delta = *level_tile;
+                level_tile_delta.is_solid ^= APP->current_is_solid;
+                level_tile_delta.index ^= APP->current_tile_index;
+                RecordAndDo(ActLevelTileUpdate(level_tile, level_tile_delta, tile_set));
             }
         }
         else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
         {
-            HistoryEndTransaction();
+            EndRecordTransaction();
         }
     }
     else
@@ -1361,6 +1344,8 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
             {
                 APP->current_tile_index = APP->world.tile_set.count - 1;
             }
+
+            TODO("DeleteTile history");
         }
     }
 }
