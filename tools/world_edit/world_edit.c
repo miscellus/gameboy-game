@@ -874,7 +874,17 @@ Action ActLevelTileUpdate(Level_Tile *level_tile, Level_Tile level_tile_delta, T
     return act;
 }
 
-Action ActTileAdd(Tile_Set *tile_set, Tile_Packed tile_delta)
+Action ActTileUpdate(Tile_Set *tile_set, uint32_t tile_index, Tile_Packed tile_delta)
+{
+    Action act = {0};
+    act.kind = ACT_TILE_UPDATE;
+    act.tile_set = tile_set;
+    act.as.tile_action.tile_index = tile_index;
+    act.as.tile_action.tile_delta = tile_delta;
+    return act;
+}
+
+Action ActTileAddLast(Tile_Set *tile_set, Tile_Packed tile_delta)
 {
     Action act = {0};
     act.kind = ACT_TILE_ADD_LAST;
@@ -892,13 +902,23 @@ Action ActTileDeleteLast(Tile_Set *tile_set, Tile_Packed tile_delta)
     return act;
 }
 
-Action ActTileUpdate(Tile_Set *tile_set, uint32_t tile_index, Tile_Packed tile_delta)
+Action ActTileInsert(Tile_Set *tile_set, Tile_Packed tile_delta, uint32_t tile_index)
 {
     Action act = {0};
-    act.kind = ACT_TILE_UPDATE;
+    act.kind = ACT_TILE_INSERT;
     act.tile_set = tile_set;
-    act.as.tile_action.tile_index = tile_index;
     act.as.tile_action.tile_delta = tile_delta;
+    act.as.tile_action.tile_index = tile_index;
+    return act;
+}
+
+Action ActTileDelete(Tile_Set *tile_set, Tile_Packed tile_delta, uint32_t tile_index)
+{
+    Action act = {0};
+    act.kind = ACT_TILE_DELETE;
+    act.tile_set = tile_set;
+    act.as.tile_action.tile_delta = tile_delta;
+    act.as.tile_action.tile_index = tile_index;
     return act;
 }
 
@@ -1049,9 +1069,9 @@ TileDeleteLast:
         {
             if (undo) goto TileDelete;
 TileInsert:
-            Tile tile = {0};
+            Tile tile = CreateTile(&APP->tile_atlas);
+            tile.color_indexes = UnpackTile(act.as.tile_action.tile_delta);
             InsertTile_(act.as.tile_action.tile_index, tile, act.tile_set);
-            TODO("Actually get the real tile data");
         } break;
 
         case ACT_TILE_DELETE:
@@ -1179,7 +1199,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
             // because it is used elsewhere.
             assert(old_tile->ref_count > 1);
 
-            Record(ActTileAdd(tile_set, PackTile(edit_tile->color_indexes)));
+            Record(ActTileAddLast(tile_set, PackTile(edit_tile->color_indexes)));
 
             Level_Tile delta = *APP->hot_tile;
             delta.index ^= edit_tile_index;
@@ -1204,7 +1224,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
             Tile_Packed tile_data = PackTile(old_tile->color_indexes);
 
-            Do(ActTileAdd(tile_set, tile_data));
+            Do(ActTileAddLast(tile_set, tile_data));
 
             edit_tile_index = GetEditTileIndex(tile_set);
         }
@@ -1326,7 +1346,7 @@ void UpdateTileTextures(Tile_Set *tile_set)
     }
 }
 
-void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
+void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set *tile_set)
 {
     bool click = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 
@@ -1334,7 +1354,7 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
 
     if (!scroll_input && !click && !delete_pressed) return;
 
-    Tile_Picker_Props p = GetTilePickerProps(view, tile_set);
+    Tile_Picker_Props p = GetTilePickerProps(view, *tile_set);
 
     KeyModifiers modifiers = GetKeyModifiers();
 
@@ -1368,13 +1388,15 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set tile_set)
     {
         if (modifiers.shift)
         {
-            // DeleteTile_(APP->current_tile_index, &APP->world.tile_set, &APP->world);
-            // if (APP->current_tile_index > APP->world.tile_set.count - 1)
-            // {
-            //     APP->current_tile_index = APP->world.tile_set.count - 1;
-            // }
+            Tile_Packed tile_data = PackTile(GetTile(tile_set, APP->current_tile_index)->color_indexes);
+            RecordAndDo(ActTileDelete(tile_set, tile_data, APP->current_tile_index));
+            EndRecordTransaction();
 
-            TODO("DeleteTile history");
+            // TODO(jkk): Make part of ACT_TILE_DELETE?
+            if (APP->current_tile_index > APP->world.tile_set.count - 1)
+            {
+                APP->current_tile_index = APP->world.tile_set.count - 1;
+            }
         }
     }
 }
@@ -1919,7 +1941,7 @@ int main(int argc, char **argv)
             UpdateWorldView(mouse_pos_screen, mouse_delta, mouse_scroll, &APP->world.level, &APP->world.tile_set);
 
         if (CheckCollisionPointRec(mouse_pos_screen, side_panel_view))
-            UpdateSidePanelView(side_panel_view, mouse_scroll, APP->world.tile_set);
+            UpdateSidePanelView(side_panel_view, mouse_scroll, &APP->world.tile_set);
 
         APP->mouse_previous = mouse_pos_screen;
 
