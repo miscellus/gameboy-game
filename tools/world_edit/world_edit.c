@@ -12,10 +12,10 @@ projects and the efforts of their creators:
     - If a library has a personality, raylib has the personality of its
       creator, Ramon. Friendly, kind, and inspiring.
 - nob.h by Alexey Kutepov
-    - Thank you much, Alexey. Both for nob.h and for your programming content
-      on Twitch and YouTube which is a joy to watch and inspires creativity!
+    - Thank you, Alexey. Both for nob.h and for your programming content
+      on Twitch and YouTube which is a joy to watch and sparks creativity!
 - tinyfiledialogs by Guillaume Vareille
-    - Awesome library that makes it less painfull to have cross platform
+    - Awesome library that makes it less painful to have cross platform
       dialog windows.
 
 ------------------------------
@@ -2047,3 +2047,4 @@ int main(int argc, char **argv)
     }
     return 0;
 }
+
