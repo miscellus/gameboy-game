@@ -136,11 +136,11 @@ typedef struct World
 typedef enum Action_Kind
 {
     ACT_LEVEL_TILE_UPDATE,
-    ACT_TILE_UPDATE,
-    ACT_TILE_ADD_LAST,
-    ACT_TILE_DELETE_LAST,
-    ACT_TILE_INSERT,
-    ACT_TILE_DELETE,
+    ACT_TILE_SET_UPDATE,
+    ACT_TILE_SET_ADD_LAST,
+    ACT_TILE_SET_DELETE_LAST,
+    ACT_TILE_SET_INSERT,
+    ACT_TILE_SET_DELETE,
 } Action_Kind;
 
 typedef struct Action_Level_Tile
@@ -877,7 +877,7 @@ Action ActLevelTileUpdate(Level_Tile *level_tile, Level_Tile level_tile_delta, T
 Action ActTileUpdate(Tile_Set *tile_set, uint32_t tile_index, Tile_Packed tile_delta)
 {
     Action act = {0};
-    act.kind = ACT_TILE_UPDATE;
+    act.kind = ACT_TILE_SET_UPDATE;
     act.tile_set = tile_set;
     act.as.tile_action.tile_index = tile_index;
     act.as.tile_action.tile_delta = tile_delta;
@@ -887,7 +887,7 @@ Action ActTileUpdate(Tile_Set *tile_set, uint32_t tile_index, Tile_Packed tile_d
 Action ActTileAddLast(Tile_Set *tile_set, Tile_Packed tile_delta)
 {
     Action act = {0};
-    act.kind = ACT_TILE_ADD_LAST;
+    act.kind = ACT_TILE_SET_ADD_LAST;
     act.tile_set = tile_set;
     act.as.tile_action.tile_delta = tile_delta;
     return act;
@@ -896,7 +896,7 @@ Action ActTileAddLast(Tile_Set *tile_set, Tile_Packed tile_delta)
 Action ActTileDeleteLast(Tile_Set *tile_set, Tile_Packed tile_delta)
 {
     Action act = {0};
-    act.kind = ACT_TILE_DELETE_LAST;
+    act.kind = ACT_TILE_SET_DELETE_LAST;
     act.tile_set = tile_set;
     act.as.tile_action.tile_delta = tile_delta;
     return act;
@@ -905,7 +905,7 @@ Action ActTileDeleteLast(Tile_Set *tile_set, Tile_Packed tile_delta)
 Action ActTileInsert(Tile_Set *tile_set, Tile_Packed tile_delta, uint32_t tile_index)
 {
     Action act = {0};
-    act.kind = ACT_TILE_INSERT;
+    act.kind = ACT_TILE_SET_INSERT;
     act.tile_set = tile_set;
     act.as.tile_action.tile_delta = tile_delta;
     act.as.tile_action.tile_index = tile_index;
@@ -915,7 +915,7 @@ Action ActTileInsert(Tile_Set *tile_set, Tile_Packed tile_delta, uint32_t tile_i
 Action ActTileDelete(Tile_Set *tile_set, Tile_Packed tile_delta, uint32_t tile_index)
 {
     Action act = {0};
-    act.kind = ACT_TILE_DELETE;
+    act.kind = ACT_TILE_SET_DELETE;
     act.tile_set = tile_set;
     act.as.tile_action.tile_delta = tile_delta;
     act.as.tile_action.tile_index = tile_index;
@@ -936,92 +936,6 @@ void EndRecordTransaction(void)
     ++APP->history.current_transaction_id;
 }
 
-void DeleteTile_(uint32_t tile_index, Tile_Set *tile_set)
-{
-    assert(tile_index < tile_set->count);
-
-    if (tile_set->count == 1) return;
-
-    World *world = &APP->world;
-
-    Tile *tile = GetTile(tile_set, tile_index);
-    FreeTileAtlasIndex(&APP->tile_atlas, tile->tile_atlas_index);
-
-    // Delete tile in tile_set
-    uint32_t last_index = tile_set->count - 1;
-    if (tile_index < last_index)
-    {
-        void *dst = &tile_set->items[tile_index];
-        void *src = &tile_set->items[tile_index + 1];
-        size_t size = (last_index - tile_index) * sizeof(*tile_set->items);
-        memmove(dst, src, size);
-    }
-    --tile_set->count;
-
-    // If we delete the last tile in the set, make sure we update level tiles
-    // using it to the previous index
-    if (tile_index == last_index) --tile_index;
-
-    // Update references
-    for (uint32_t i = 0; i < world->level.width*world->level.height; ++i)
-    {
-        Level_Tile *level_tile = &world->level.tiles[i];
-        if (level_tile->index > tile_index)
-        {
-            if (level_tile->index < tile_set->count) --tile_set->items[level_tile->index].ref_count;
-            --level_tile->index;
-            ++tile_set->items[level_tile->index].ref_count;
-        }
-    }
-}
-
-void InsertTile_(uint32_t tile_index, Tile new_tile, Tile_Set *tile_set)
-{
-    assert(tile_index <= tile_set->count); // allow append at count
-
-    World *world = &APP->world;
-
-    // Ensure capacity for one more tile
-    da_reserve(tile_set, tile_set->count + 1);
-
-    uint32_t last_index = tile_set->count;
-    // If inserting not at the end, shift existing tiles up to make room
-    if (tile_index < last_index)
-    {
-        void *dst = &tile_set->items[tile_index + 1];
-        void *src = &tile_set->items[tile_index];
-        size_t size = (last_index - tile_index) * sizeof(*tile_set->items);
-        memmove(dst, src, size);
-    }
-
-    // Place the new tile into tile_set
-    tile_set->items[tile_index] = new_tile;
-
-    ++tile_set->count;
-
-    // Update references in levels: any tile indices >= tile_index (before insertion)
-    // must be incremented to point to the same logical tile after insertion.
-    // We also need to adjust ref_counts accordingly.
-    for (uint32_t i = 0; i < world->level.width * world->level.height; ++i)
-    {
-        Level_Tile *level_tile = &world->level.tiles[i];
-
-        // Before insertion, valid indices were [0 .. last_index-1].
-        // After insertion, any level_tile->index >= tile_index should become index+1.
-        if (level_tile->index >= tile_index)
-        {
-            // Decrement ref_count of the tile that currently sits at level_tile->index
-            // (it will move to index+1). Only adjust if the index was valid in the old range.
-            if (level_tile->index < last_index) --tile_set->items[level_tile->index].ref_count;
-
-            ++level_tile->index;
-
-            // Increment ref_count for the tile at the new index (after shift).
-            if (level_tile->index < tile_set->count) ++tile_set->items[level_tile->index].ref_count;
-        }
-    }
-}
-
 void PerformAction(Action act, bool undo)
 {
     switch (act.kind)
@@ -1037,7 +951,7 @@ void PerformAction(Action act, bool undo)
             tile_new->ref_count += 1;
         } break;
 
-        case ACT_TILE_UPDATE:
+        case ACT_TILE_SET_UPDATE:
         {
             Tile *tile = GetTile(act.tile_set, act.as.tile_action.tile_index);
             Tile_Packed old_packed = PackTile(tile->color_indexes);
@@ -1046,7 +960,7 @@ void PerformAction(Action act, bool undo)
             tile->texture_needs_update = true;
         } break;
 
-        case ACT_TILE_ADD_LAST:
+        case ACT_TILE_SET_ADD_LAST:
         {
             if (undo) goto TileDeleteLast;
 TileAdd:
@@ -1055,7 +969,7 @@ TileAdd:
             da_append(act.tile_set, tile);
         } break;
 
-        case ACT_TILE_DELETE_LAST:
+        case ACT_TILE_SET_DELETE_LAST:
         {
             if (undo) goto TileAdd;
 TileDeleteLast:
@@ -1064,21 +978,59 @@ TileDeleteLast:
             act.tile_set->count -= 1;
         } break;
 
-
-        case ACT_TILE_INSERT:
+        case ACT_TILE_SET_INSERT:
         {
             if (undo) goto TileDelete;
 TileInsert:
-            Tile tile = CreateTile(&APP->tile_atlas);
-            tile.color_indexes = UnpackTile(act.as.tile_action.tile_delta);
-            InsertTile_(act.as.tile_action.tile_index, tile, act.tile_set);
+            uint32_t tile_index = act.as.tile_action.tile_index;
+            Tile_Set *tile_set = act.tile_set;
+
+            assert(tile_index <= tile_set->count); // allow append at count
+
+            // Ensure capacity for one more tile
+            da_reserve(tile_set, tile_set->count + 1);
+            tile_set->count += 1;
+
+            uint32_t last_index = tile_set->count - 1;
+            // If inserting not at the end, shift existing tiles up to make room
+            if (tile_index < last_index)
+            {
+                void *dst = &tile_set->items[tile_index + 1];
+                void *src = &tile_set->items[tile_index];
+                size_t size = (last_index - tile_index) * sizeof(*tile_set->items);
+                memmove(dst, src, size);
+            }
+
+            Tile new_tile = CreateTile(&APP->tile_atlas);
+            new_tile.color_indexes = UnpackTile(act.as.tile_action.tile_delta);
+            // Place the new tile into tile_set
+            tile_set->items[tile_index] = new_tile;
         } break;
 
-        case ACT_TILE_DELETE:
+        case ACT_TILE_SET_DELETE:
         {
             if (undo) goto TileInsert;
 TileDelete:
-            DeleteTile_(act.as.tile_action.tile_index, act.tile_set);
+            uint32_t tile_index = act.as.tile_action.tile_index;
+            Tile_Set *tile_set = act.tile_set;
+
+            assert(tile_index < tile_set->count);
+
+            if (tile_set->count == 1) break;
+
+            Tile *tile = GetTile(tile_set, tile_index);
+            FreeTileAtlasIndex(&APP->tile_atlas, tile->tile_atlas_index);
+
+            // Delete tile in tile_set
+            uint32_t last_index = tile_set->count - 1;
+            if (tile_index < last_index)
+            {
+                void *dst = &tile_set->items[tile_index];
+                void *src = &tile_set->items[tile_index + 1];
+                size_t size = (last_index - tile_index) * sizeof(*tile_set->items);
+                memmove(dst, src, size);
+            }
+            tile_set->count -= 1;
         } break;
 
         default:
@@ -1146,6 +1098,56 @@ static inline void RecordAndDo(Action act)
 {
     Record(act);
     Do(act);
+}
+
+void DeleteTile(Tile_Set *tile_set, uint32_t tile_index)
+{
+    // If we delete the last tile in the set, make sure we update level tiles
+    // using it to the previous index
+    uint32_t tile_index_above_which_to_decrement = tile_index;
+    if (tile_index == tile_set->count - 1)
+    {
+        tile_index_above_which_to_decrement -= 1;
+    }
+
+    World *world = &APP->world;
+
+    // Update level tiles to not refer to the tile we are about to delete
+    for (uint32_t i = 0; i < world->level.width*world->level.height; ++i)
+    {
+        Level_Tile *level_tile = &world->level.tiles[i];
+        if (level_tile->index > tile_index_above_which_to_decrement)
+        {
+            Level_Tile delta = *level_tile;
+            delta.index ^= delta.index - 1;
+            RecordAndDo(ActLevelTileUpdate(level_tile, delta, tile_set));
+        }
+    }
+
+    // Actually delete tile from tile set
+    Tile *tile = GetTile(tile_set, tile_index);
+    Tile_Packed tile_data = PackTile(tile->color_indexes);
+    RecordAndDo(ActTileDelete(tile_set, tile_data, tile_index));
+}
+
+void InsertTile(Tile_Set *tile_set, uint32_t tile_index, Tile_Packed tile_data)
+{
+    // Actually insert tile in tile set
+    RecordAndDo(ActTileInsert(tile_set, tile_data, tile_index));
+
+    World *world = &APP->world;
+
+    // Update level tiles to not refer to the tile we are about to delete
+    for (uint32_t i = 0; i < world->level.width*world->level.height; ++i)
+    {
+        Level_Tile *level_tile = &world->level.tiles[i];
+        if (level_tile->index >= tile_index)
+        {
+            Level_Tile delta = *level_tile;
+            delta.index ^= delta.index + 1;
+            RecordAndDo(ActLevelTileUpdate(level_tile, delta, tile_set));
+        }
+    }
 }
 
 void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *tile_set)
@@ -1388,11 +1390,10 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set *tile_set)
     {
         if (modifiers.shift)
         {
-            Tile_Packed tile_data = PackTile(GetTile(tile_set, APP->current_tile_index)->color_indexes);
-            RecordAndDo(ActTileDelete(tile_set, tile_data, APP->current_tile_index));
+            DeleteTile(tile_set, APP->current_tile_index);
             EndRecordTransaction();
 
-            // TODO(jkk): Make part of ACT_TILE_DELETE?
+            // TODO(jkk): Make part of ACT_TILE_SET_DELETE?
             if (APP->current_tile_index > APP->world.tile_set.count - 1)
             {
                 APP->current_tile_index = APP->world.tile_set.count - 1;
