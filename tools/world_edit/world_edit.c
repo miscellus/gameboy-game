@@ -1380,7 +1380,7 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set *tile_set)
     if (click)
     {
         int32_t tile_index = SidePanelGetHoveredTileIndex(view, GetMousePosition(), p);
-        if (tile_index >= 0)
+        if ((uint32_t)tile_index < tile_set->count)
         {
             APP->current_tile_index = tile_index;
         }
@@ -1402,7 +1402,7 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set *tile_set)
     }
 }
 
-void DrawBrushPreview(Rectangle world_view, Tile_Set tile_set)
+void DrawBrushPreview(Rectangle world_view, Tile_Set *tile_set)
 {
     UNUSED(tile_set);
     float size = 100.0f;
@@ -1419,9 +1419,9 @@ void DrawBrushPreview(Rectangle world_view, Tile_Set tile_set)
     {
         legend = "TILE";
         if (APP->current_is_solid) legend = "TILE (SOLID)";
-
-        // Texture texture = GetTexture(tile_set.items[APP->current_tile_index].texture_index);
-        // DrawTexturePro(texture, (Rectangle){0,0,8,8}, rect, (Vector2){0}, 0, WHITE);
+        Tile *tile = GetTile(tile_set, APP->current_tile_index);
+        Rectangle tex_rect = TileAtlasIndexToRect(tile->tile_atlas_index);
+        DrawTexturePro(APP->tile_atlas.texture, tex_rect, rect, (Vector2){0}, 0, WHITE);
     }
     else if (APP->mode == MODE_DRAW_PIXELS)
     {
@@ -1964,7 +1964,7 @@ int main(int argc, char **argv)
         DrawSidePanel(side_panel_view, &APP->world.tile_set);
         DrawRectangleLinesEx(side_panel_view, 3, COLOR_PANEL_BORDER);
 
-        DrawBrushPreview(world_view, APP->world.tile_set);
+        DrawBrushPreview(world_view, &APP->world.tile_set);
 #endif
         EndDrawing();
 
