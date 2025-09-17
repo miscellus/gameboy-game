@@ -735,7 +735,7 @@ typedef struct
     uint32_t num_rows;
 } Tile_Picker_Props;
 
-Tile_Picker_Props GetTilePickerProps(Rectangle view, Tile_Set tile_set)
+Tile_Picker_Props GetTilePickerProps(Rectangle view, uint32_t tile_count)
 {
     float tile_size = APP->side_panel_zoom * 8.0f;
     if (tile_size > view.width)
@@ -757,7 +757,7 @@ Tile_Picker_Props GetTilePickerProps(Rectangle view, Tile_Set tile_set)
     p.gap = gap;
     p.gap_min = gap_min;
     p.tiles_per_row = tiles_per_row;
-    p.num_rows = (tile_set.count + tiles_per_row - 1) / tiles_per_row;
+    p.num_rows = (tile_count + tiles_per_row - 1) / tiles_per_row;
     return p;
 }
 
@@ -808,22 +808,22 @@ int32_t SidePanelGetHoveredTileIndex(Rectangle view, Vector2 point, Tile_Picker_
     return tile_x + p.tiles_per_row * tile_y;
 }
 
-void DrawSidePanel(Rectangle view, Tile_Set tile_set)
+void DrawSidePanel(Rectangle view, Tile_Set *tile_set)
 {
     BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
 
     ClearBackground(COLOR_TILESET_BACKGROUND);
 
-    Tile_Picker_Props props = GetTilePickerProps(view, tile_set);
+    Tile_Picker_Props props = GetTilePickerProps(view, tile_set->count);
 
     // Draw tile set
 
     Vector2 mouse = GetMousePosition();
     uint32_t hovered_tile_index = (uint32_t)SidePanelGetHoveredTileIndex(view, mouse, props);
 
-    for (uint32_t i = 0; i < (uint32_t)tile_set.count; ++i)
+    for (uint32_t i = 0; i < (uint32_t)tile_set->count; ++i)
     {
-        Tile *tile = &tile_set.items[i];
+        Tile *tile = GetTile(tile_set, i);
         // Texture2D texture = GetTexture(tile->texture_index);
 
         Rectangle tile_rect = GetSidePanelTileRect(view, i, props);
@@ -1354,7 +1354,7 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set *tile_set)
 
     if (!scroll_input && !click && !delete_pressed) return;
 
-    Tile_Picker_Props p = GetTilePickerProps(view, *tile_set);
+    Tile_Picker_Props p = GetTilePickerProps(view, tile_set->count);
 
     KeyModifiers modifiers = GetKeyModifiers();
 
@@ -1960,7 +1960,7 @@ int main(int argc, char **argv)
         DrawWorldView(world_view, APP->world, mouse_pos_screen);
         DrawRectangleLinesEx(world_view, 3, COLOR_PANEL_BORDER);
 
-        DrawSidePanel(side_panel_view, APP->world.tile_set);
+        DrawSidePanel(side_panel_view, &APP->world.tile_set);
         DrawRectangleLinesEx(side_panel_view, 3, COLOR_PANEL_BORDER);
 
         DrawBrushPreview(world_view, APP->world.tile_set);
