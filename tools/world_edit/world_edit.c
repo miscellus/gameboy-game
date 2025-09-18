@@ -112,6 +112,7 @@ misrepresented as being the original software.
 
 #define INVALID_TILE_INDEX ((uint32_t)-1)
 #define INVALID_TILE_ATLAS_INDEX ((uint32_t)-1)
+#define INVALID_TILE ((Tile*)NULL)
 
 #define TILE_ATLAS_DIM (8 * 1024)
 #define TILE_ATLAS_CAPACITY (TILE_ATLAS_DIM / 8 * TILE_ATLAS_DIM / 8)
@@ -428,6 +429,17 @@ static inline Tile_Packed PackTile(Tile_Color_Indexes color_indexes)
     return tile_pk;
 }
 
+static inline Tile_Packed MakePackedTileWithColor(uint8_t color_index)
+{
+    Tile_Packed tile_packed;
+    assert(color_index < 4);
+    uint8_t c = color_index; // ......CI
+    c |= (c << 2);           // ....CICI
+    c |= (c << 4);           // CICICICI
+    memset(&tile_packed, c, sizeof(tile_packed));
+    return tile_packed;
+}
+
 static inline Tile_Packed XorPackedTile(Tile_Packed a, Tile_Packed b)
 {
     a.u64s[0] ^= b.u64s[0];
@@ -510,7 +522,7 @@ Level_Tile *LevelGetTile(Level level, uint32_t tile_x, uint32_t tile_y)
 
 Tile *GetTile(Tile_Set *tile_set, uint32_t index)
 {
-    if (index == INVALID_TILE_INDEX) return NULL;
+    if (index == INVALID_TILE_INDEX) return INVALID_TILE;
     assert(index < tile_set->count);
     return &tile_set->items[index];
 }
@@ -941,17 +953,15 @@ void DrawSidePanel(Rectangle view, Tile_Set *tile_set)
     EndScissorMode();
 }
 
-uint32_t FindTileMatch(Tile_Set tile_set, Tile *src_tile, uint32_t skip_index)
+uint32_t FindTileMatch(Tile_Set *tile_set, Tile_Packed needle, uint32_t skip_index)
 {
-    Tile_Packed src_tile_pk = PackTile(src_tile->color_indexes);
-
-    for (uint32_t i = 0; i < tile_set.count; ++i)
+    for (uint32_t i = 0; i < tile_set->count; ++i)
     {
         if (i == skip_index) continue;
 
-        Tile *tile = &tile_set.items[i];
+        Tile *tile = &tile_set->items[i];
         Tile_Packed tile_pk = PackTile(tile->color_indexes);
-        if (PackedTilesAreEqual(src_tile_pk, tile_pk))
+        if (PackedTilesAreEqual(needle, tile_pk))
         {
             return i;
         }
@@ -988,7 +998,7 @@ static inline Action ActTileUpdatePixels(Tile_Set *tile_set, uint32_t tile_index
 Action ActTileAddToRefCount(Tile_Set *tile_set, uint32_t tile_index, int32_t ref_count_increment)
 {
     Tile *tile = GetTile(tile_set, tile_index);
-    assert(tile->ref_count + (uint32_t)ref_count_increment < APP->world.level.width * APP->world.level.height);
+    assert(tile->ref_count + (uint32_t)ref_count_increment <= APP->world.level.width * APP->world.level.height);
     uint32_t ref_count_delta = tile->ref_count ^ (tile->ref_count + ref_count_increment);
     return ActTileUpdate(tile_set, tile_index, (Tile_Packed){0}, ref_count_delta);
 }
@@ -1115,10 +1125,9 @@ TileInsert:
 TileDelete:
             uint32_t tile_index = act.as.tile_action.tile_index;
             Tile_Set *tile_set = act.tile_set;
+            if (tile_set->count == 0) break;
 
             assert(tile_index < tile_set->count);
-
-            if (tile_set->count == 1) break;
 
             Tile *tile = GetTile(tile_set, tile_index);
             FreeTileAtlasIndex(&APP->tile_atlas, tile->tile_atlas_index);
@@ -1161,8 +1170,8 @@ static inline void RecordAndDo(Action act)
 
 void LevelTileUpdateAndRefCount(Level_Tile *level_tile, uint32_t new_tile_index, bool new_is_solid, Tile_Set *tile_set)
 {
-    RecordAndDo(ActTileAddToRefCount(tile_set, level_tile->index, -1));
-    RecordAndDo(ActTileAddToRefCount(tile_set, new_tile_index, +1));
+    if (level_tile->index != INVALID_TILE_INDEX) RecordAndDo(ActTileAddToRefCount(tile_set, level_tile->index, -1));
+    if (new_tile_index != INVALID_TILE_INDEX) RecordAndDo(ActTileAddToRefCount(tile_set, new_tile_index, +1));
     Level_Tile delta = *level_tile;
     delta.index ^= new_tile_index;
     delta.is_solid ^= new_is_solid;
@@ -1232,6 +1241,9 @@ void HistoryRedo(void)
 
 void DeleteTile(Tile_Set *tile_set, uint32_t tile_index)
 {
+    if (tile_set->count == 0) return;
+    assert(tile_index < tile_set->count);
+
     World *world = &APP->world;
 
     // Update level tiles to not refer to the tile we are about to delete
@@ -1244,7 +1256,7 @@ void DeleteTile(Tile_Set *tile_set, uint32_t tile_index)
             delta.index ^= INVALID_TILE_INDEX;
             RecordAndDo(ActLevelTileUpdate(level_tile, delta, tile_set));
         }
-        else if (level_tile->index > tile_index)
+        else if (level_tile->index > tile_index && level_tile->index != INVALID_TILE_INDEX)
         {
             Level_Tile delta = *level_tile;
             delta.index ^= delta.index - 1;
@@ -1272,15 +1284,15 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
     if (APP->hot_tile && (has_entered_new_tile || mouse_released))
     {
         Tile *edit_tile = GetTile(tile_set, edit_tile_index);
-        Tile *old_tile = GetTile(tile_set, APP->hot_tile->index);
+        Tile* old_tile = GetTile(tile_set, APP->hot_tile->index);
 
         assert(edit_tile_index != APP->hot_tile->index);
         assert(edit_tile->ref_count == 0);
-        assert(old_tile->ref_count > 0);
+        assert(!old_tile || old_tile->ref_count > 0);
         assert(edit_tile_index == tile_set->count - 1);
 
         // Deduplicate last auto tile
-        uint32_t matched_tile_index = FindTileMatch(*tile_set, edit_tile, edit_tile_index);
+        uint32_t matched_tile_index = FindTileMatch(tile_set, PackTile(edit_tile->color_indexes), edit_tile_index);
 
         if (matched_tile_index != INVALID_TILE_INDEX)
         {
@@ -1290,7 +1302,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
             // Remove temporary edit tile
             Do(ActTileDeleteLast(tile_set, PackTile(edit_tile->color_indexes)));
         }
-        else if (old_tile->ref_count == 1)
+        else if (old_tile && old_tile->ref_count == 1)
         {
             // We can reuse the old tile
             Tile_Packed delta = XorPackedTile(PackTile(old_tile->color_indexes), PackTile(edit_tile->color_indexes));
@@ -1303,7 +1315,7 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
         {
             // We have a unique tile and we can't just overwrite the old tile
             // because it is used elsewhere.
-            assert(old_tile->ref_count > 1);
+            assert(!old_tile || old_tile->ref_count > 1);
 
             Record(ActTileAddLast(tile_set, PackTile(edit_tile->color_indexes)));
 
@@ -1323,10 +1335,12 @@ void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *
 
             // Figure out if we can just modify the existing tile
             // or if we need to AUTOMATICALLY create a NEW TILE.
-            Tile *old_tile = GetTile(tile_set, level_tile->index);
-            assert(old_tile->ref_count > 0 && "The ref count should be > 0 since we got the tile from the level");
 
-            Tile_Packed tile_data = PackTile(old_tile->color_indexes);
+            Tile* old_tile = GetTile(tile_set, level_tile->index);
+            assert(!old_tile || old_tile->ref_count > 0 && "The ref count should be > 0 since we got the tile from the level");
+            Tile_Packed tile_data = (old_tile)
+                ? PackTile(old_tile->color_indexes)
+                : MakePackedTileWithColor(APP->current_color_index);
 
             Do(ActTileAddLast(tile_set, tile_data));
 
@@ -1368,6 +1382,25 @@ void ModeDrawPixels(Vector2 mouse_pos_world, Level *level, Tile_Set *tile_set)
         if (has_entered_new_tile || IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
         {
             APP->hot_tile = level_tile;
+
+            if (!tile)
+            {
+                Tile_Packed tile_data = MakePackedTileWithColor(APP->current_color_index);
+
+                uint32_t new_tile_index = FindTileMatch(tile_set, tile_data, INVALID_TILE_INDEX);
+
+                if (new_tile_index == INVALID_TILE_INDEX)
+                {
+                    RecordAndDo(ActTileAddLast(tile_set, tile_data));
+                    new_tile_index = tile_set->count - 1;
+                }
+
+                LevelTileUpdateAndRefCount(level_tile, new_tile_index, level_tile->is_solid, tile_set);
+
+                tile = GetTile(tile_set, level_tile->index);
+                assert(tile);
+            }
+
             APP->tile_snapshot = PackTile(tile->color_indexes);
         }
 
@@ -1443,9 +1476,7 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set *tile_set)
 {
     bool click = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 
-    bool delete_pressed = IsKeyPressed(KEY_DELETE);
-
-    if (!scroll_input && !click && !delete_pressed) return;
+    if (!scroll_input && !click) return;
 
     Tile_Picker_Props p = GetTilePickerProps(view, tile_set->count);
 
@@ -1474,21 +1505,6 @@ void UpdateSidePanelView(Rectangle view, float scroll_input, Tile_Set *tile_set)
         if ((uint32_t)tile_index < tile_set->count)
         {
             APP->current_tile_index = tile_index;
-        }
-    }
-
-    if (delete_pressed)
-    {
-        if (modifiers.shift)
-        {
-            DeleteTile(tile_set, APP->current_tile_index);
-            EndRecordTransaction();
-
-            // TODO(jkk): Make part of ACT_TILE_SET_DELETE?
-            if (APP->current_tile_index > APP->world.tile_set.count - 1)
-            {
-                APP->current_tile_index = APP->world.tile_set.count - 1;
-            }
         }
     }
 }
@@ -2008,6 +2024,18 @@ void GlobalShortcuts(void)
 
     if (IsKeyPressed(KEY_I) && !modifiers.shift)  APP->show_tile_indexes ^= true;
     if (IsKeyPressed(KEY_I) && modifiers.shift)  APP->show_tile_ref_counts ^= true;
+
+    if (IsKeyPressed(KEY_DELETE) && modifiers.shift)
+    {
+        DeleteTile(&APP->world.tile_set, APP->current_tile_index);
+        EndRecordTransaction();
+
+        // TODO(jkk): Make part of ACT_TILE_SET_DELETE?
+        if (APP->current_tile_index > APP->world.tile_set.count - 1)
+        {
+            APP->current_tile_index = APP->world.tile_set.count - 1;
+        }
+    }
 }
 
 int main(int argc, char **argv)
