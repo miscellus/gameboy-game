@@ -69,15 +69,6 @@ int main(int argc, char **argv)
 
     if (!mkdir_if_not_exists(PATH_BUILD)) return 1;
 
-#if 0
-    log(INFO, "Building Game Boy Game\n");
-    if (!build_game_boy_game()) return 1;
-#endif
-
-    log(INFO, "Building World Edit\n");
-    if (!build_world_edit()) return 1;
-
-
     bool run = false;
     bool gb = false;
     bool world_edit = false;
@@ -101,6 +92,18 @@ int main(int argc, char **argv)
         {
             fprintf(stderr, "Unknown argument: `%s`\n", *argv);
         }
+    }
+
+    if (gb)
+    {
+        log(INFO, "Building Game Boy Game\n");
+        if (!build_game_boy_game()) return 1;
+    }
+
+    if (world_edit)
+    {
+        log(INFO, "Building World Edit\n");
+        if (!build_world_edit()) return 1;
     }
 
     if (run)
