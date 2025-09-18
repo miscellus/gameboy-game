@@ -286,6 +286,7 @@ typedef struct App
     bool show_tile_indexes;
     bool auto_new_tile;
     bool show_game_boy_screen;
+    bool show_tile_ref_counts;
 
     Level_Tile *hot_tile;
     Tile_Packed tile_snapshot;
@@ -508,6 +509,7 @@ Level_Tile *LevelGetTile(Level level, uint32_t tile_x, uint32_t tile_y)
 
 Tile *GetTile(Tile_Set *tile_set, uint32_t index)
 {
+    if (index == INVALID_TILE_INDEX) return NULL;
     assert(index < tile_set->count);
     return &tile_set->items[index];
 }
@@ -577,7 +579,7 @@ void InitApp(void)
 
     APP->side_panel_width_min = 300.0f;
     APP->side_panel_width = 200.0f;
-    APP->side_panel_zoom = 4.0f;
+    APP->side_panel_zoom = 10.0f;
     APP->side_panel_scroll_offset = 0.0f;
 
     APP->mouse_previous = (Vector2){0};
@@ -590,11 +592,12 @@ void InitApp(void)
     APP->hide_grid = false;
     APP->show_game_boy_screen = false;
     APP->show_tile_indexes = false;
+    APP->show_tile_ref_counts = true;
     APP->auto_new_tile = true;
 
     InitTileAtlas(&APP->tile_atlas);
 
-    InitWorld(&APP->world, 128, 64);
+    InitWorld(&APP->world, 3, 1);
 
     APP->history = (History){0};
 
@@ -723,13 +726,20 @@ void DrawWorldView(Rectangle view, World world, Vector2 mouse_pos_screen)
                 {
                     tile_index = GetEditTileIndex(tile_set);
                 }
-                assert(tile_index < tile_set->count);
-
-                Tile *tile = GetTile(tile_set, tile_index);
 
                 Rectangle tile_rect = {tile_x*8.0f, tile_y*8.0f, 8.0f, 8.0f};
-                Rectangle rec = TileAtlasIndexToRect(tile->tile_atlas_index);
-                DrawTexturePro(APP->tile_atlas.texture, rec, tile_rect, (Vector2){0}, 0, WHITE);
+
+                Tile *tile = GetTile(tile_set, tile_index);
+                if (tile)
+                {
+                    assert(tile_index < tile_set->count);
+                    Rectangle rec = TileAtlasIndexToRect(tile->tile_atlas_index);
+                    DrawTexturePro(APP->tile_atlas.texture, rec, tile_rect, (Vector2){0}, 0, WHITE);
+                }
+                else
+                {
+                    DrawRectangleRec(tile_rect, PINK);
+                }
                 if (level_tile->is_solid) DrawRectangleRec(tile_rect, COLOR_SOLID_BRUSH);
             }
         }
@@ -916,6 +926,14 @@ void DrawSidePanel(Rectangle view, Tile_Set *tile_set)
             Rectangle border_rect = PadRect(tile_rect, -border);
             DrawRectangleLinesEx(border_rect, border, BLACK);
         }
+
+        if (APP->show_tile_ref_counts)
+        {
+            Font font = GetFontDefault();
+            float ts = props.tile_size;
+            Vector2 pos = {tile_rect.x + 0.1f * ts, tile_rect.y + 0.1f * ts};
+            DrawTextEx(font, TextFormat("%x", tile->ref_count), pos, ts * 0.5f, 1.0f, BLACK);
+        }
     }
     // DrawText(TextFormat("%0.2f", tile_size), (int)(view.x + 20), (int)(view.y + 20), 50, RED);
 
@@ -1018,13 +1036,13 @@ void PerformAction(Action act, bool undo)
     {
         case ACT_LEVEL_TILE_UPDATE:
         {
-            Tile *tile_old = GetTile(act.tile_set, act.as.level_action.level_tile->index);
+            uint32_t old_tile_index = act.as.level_action.level_tile->index;
             act.as.level_action.level_tile->index ^= act.as.level_action.level_tile_delta.index;
             act.as.level_action.level_tile->is_solid ^= act.as.level_action.level_tile_delta.is_solid;
-            Tile *tile_new = GetTile(act.tile_set, act.as.level_action.level_tile->index);
+            uint32_t new_tile_index = act.as.level_action.level_tile->index;
 
-            tile_old->ref_count -= 1;
-            tile_new->ref_count += 1;
+            if (old_tile_index < act.tile_set->count) GetTile(act.tile_set, old_tile_index)->ref_count -= 1;
+            if (new_tile_index < act.tile_set->count) GetTile(act.tile_set, new_tile_index)->ref_count += 1;
         } break;
 
         case ACT_TILE_SET_UPDATE:
@@ -1178,24 +1196,16 @@ static inline void RecordAndDo(Action act)
 
 void DeleteTile(Tile_Set *tile_set, uint32_t tile_index)
 {
-    // If we delete the last tile in the set, make sure we update level tiles
-    // using it to the previous index
-    uint32_t tile_index_above_which_to_decrement = tile_index;
-    if (tile_index == tile_set->count - 1)
-    {
-        tile_index_above_which_to_decrement -= 1;
-    }
-
     World *world = &APP->world;
 
     // Update level tiles to not refer to the tile we are about to delete
     for (uint32_t i = 0; i < world->level.width*world->level.height; ++i)
     {
         Level_Tile *level_tile = &world->level.tiles[i];
-        if (level_tile->index > tile_index_above_which_to_decrement)
+        if (level_tile->index == tile_index)
         {
             Level_Tile delta = *level_tile;
-            delta.index ^= delta.index - 1;
+            delta.index ^= INVALID_TILE_INDEX;
             RecordAndDo(ActLevelTileUpdate(level_tile, delta, tile_set));
         }
     }
@@ -1204,8 +1214,20 @@ void DeleteTile(Tile_Set *tile_set, uint32_t tile_index)
     Tile *tile = GetTile(tile_set, tile_index);
     Tile_Packed tile_data = PackTile(tile->color_indexes);
     RecordAndDo(ActTileDelete(tile_set, tile_data, tile_index));
+
+    for (uint32_t i = 0; i < world->level.width*world->level.height; ++i)
+    {
+        Level_Tile *level_tile = &world->level.tiles[i];
+        if (level_tile->index > tile_index && level_tile->index != INVALID_TILE_INDEX)
+        {
+            Level_Tile delta = *level_tile;
+            delta.index ^= delta.index - 1;
+            RecordAndDo(ActLevelTileUpdate(level_tile, delta, tile_set));
+        }
+    }
 }
 
+#if 0
 void InsertTile(Tile_Set *tile_set, uint32_t tile_index, Tile_Packed tile_data)
 {
     // Actually insert tile in tile set
@@ -1225,6 +1247,7 @@ void InsertTile(Tile_Set *tile_set, uint32_t tile_index, Tile_Packed tile_data)
         }
     }
 }
+#endif
 
 void ModeDrawPixelsAutoNewTile(Vector2 mouse_pos_world, Level *level, Tile_Set *tile_set)
 {
