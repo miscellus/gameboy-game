@@ -1358,14 +1358,6 @@ void UpdateWorldView(Vector2 mouse_pos_screen, Vector2 mouse_delta, float mouse_
     }
     ViewUpdate(&APP->camera_world, mouse_scroll, mouse_pos_screen, ZOOM_MIN, ZOOM_MAX, mouse_delta);
 
-    KeyModifiers modifiers = GetKeyModifiers();
-
-    if (IsKeyPressed(KEY_G) && !modifiers.shift) APP->hide_grid ^= 1;
-    if (IsKeyPressed(KEY_G) && modifiers.shift) APP->show_game_boy_screen ^= 1;
-
-    if (IsKeyPressed(KEY_I))  APP->show_tile_indexes = !APP->show_tile_indexes;
-
-
     if (APP->mode == MODE_DRAW_PIXELS)
     {
         if (IsKeyPressed(KEY_ONE)) APP->current_color_index = COLOR_GB_DARK;
@@ -1987,6 +1979,12 @@ void GlobalShortcuts(void)
             APP->current_tile_index = (APP->current_tile_index + change + APP->world.tile_set.count) % (APP->world.tile_set.count);
         }
     }
+
+    if (IsKeyPressed(KEY_G) && !modifiers.shift) APP->hide_grid ^= true;
+    if (IsKeyPressed(KEY_G) && modifiers.shift) APP->show_game_boy_screen ^= true;
+
+    if (IsKeyPressed(KEY_I) && !modifiers.shift)  APP->show_tile_indexes ^= true;
+    if (IsKeyPressed(KEY_I) && modifiers.shift)  APP->show_tile_ref_counts ^= true;
 }
 
 int main(int argc, char **argv)
